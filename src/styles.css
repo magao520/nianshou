@@ -338,9 +338,10 @@ canvas {
   height: 38px;
   margin: 0 auto;
   border-radius: 12px;
-  background-size: 400% 100%;
-  background-position: 0% 50%;
+  background-size: 82% 82%;
+  background-position: center;
   background-repeat: no-repeat;
+  image-rendering: pixelated;
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.35));
 }
 

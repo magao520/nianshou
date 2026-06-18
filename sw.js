@@ -1,11 +1,15 @@
-const CACHE_NAME = "cloud-farm-v6";
+const CACHE_NAME = "cloud-farm-v7";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=5",
-  "./src/styles.css?v=5",
-  "./src/game.js?v=5",
+  "./manifest.webmanifest?v=6",
+  "./src/styles.css?v=6",
+  "./src/game.js?v=6",
   "./assets/icon.svg",
+  "./assets/vendor/kenney-farm-expansion-tilemap.png",
+  "./assets/vendor/opengameart-simple-farm-tiles.png",
+  "./assets/vendor/ASSET_CREDITS.md",
+  "./assets/vendor/KENNEY_CC0_LICENSE.txt",
 ];
 
 self.addEventListener("install", (event) => {

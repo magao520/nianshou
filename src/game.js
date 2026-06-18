@@ -119,6 +119,19 @@ function paintPixels(target, ox, oy, lines, palette) {
 
 // ---------- 程序化生成像素美术 ----------
 const SPRITES = {};
+const EXT = {
+  kenneyFarm: loadExternalImage("./assets/vendor/kenney-farm-expansion-tilemap.png"),
+  simpleFarm: loadExternalImage("./assets/vendor/opengameart-simple-farm-tiles.png"),
+};
+
+function loadExternalImage(src) {
+  const img = new Image();
+  const asset = { ready: false, image: img };
+  img.onload = () => { asset.ready = true; };
+  img.onerror = () => { asset.ready = false; };
+  img.src = src;
+  return asset;
+}
 
 function buildAssets() {
   buildTileSet();
@@ -138,10 +151,17 @@ function buildTileSet() {
   const grassBase = (ox) => {
     for (let py = 0; py < TILE; py += 1) {
       for (let px = 0; px < TILE; px += 1) {
-        const v = (px * 7 + py * 13) % 5;
-        x.fillStyle = v === 0 ? PAL.grass3 : v === 1 ? PAL.grass2 : v === 2 ? PAL.grass4 : PAL.grass1;
+        // 伪随机散点，不做规律斜纹，避免画面像“廉价纹理平铺”。
+        const v = (px * 37 + py * 57 + px * py * 11) % 29;
+        x.fillStyle = v < 3 ? PAL.grass3 : v < 8 ? PAL.grass2 : v > 25 ? PAL.grass4 : PAL.grass1;
         x.fillRect(ox + px, py, 1, 1);
       }
+    }
+    x.fillStyle = "rgba(255,255,255,0.10)";
+    for (let i = 0; i < 4; i += 1) {
+      const gx = (i * 5 + ox) % TILE;
+      const gy = (i * 7 + 3) % TILE;
+      x.fillRect(ox + gx, gy, 1, 2);
     }
   };
 
@@ -737,6 +757,7 @@ let lastChatSignature = "";
 let input = { left: false, right: false, up: false, down: false, action: false };
 let game = createInitialState();
 let actionFlash = 0;
+let lastGamepadButtons = new Set();
 
 function createInitialState() {
   return {
@@ -1002,6 +1023,7 @@ function render() {
 
   drawTiles(cam);
   drawBuildings(cam);
+  drawExternalProps(cam);
   drawPlots(cam);
   drawCrops(cam);
 
@@ -1017,8 +1039,9 @@ function render() {
   const w = canvas.width, h = canvas.height;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, w, h);
-  // 居中放大
-  const scale = Math.max(1, Math.min(Math.floor(w / VIEW_W), Math.floor(h / VIEW_H)));
+  // 铺满屏幕：之前用 contain 会在超宽/非 16:9 设备上形成“鞋垫子”黑边。
+  // 这里改为 cover，保持像素画面比例，同时填满整个横屏区域。
+  const scale = Math.max(w / VIEW_W, h / VIEW_H);
   const sw = VIEW_W * scale;
   const sh = VIEW_H * scale;
   const ox = Math.floor((w - sw) / 2);
@@ -1050,12 +1073,46 @@ function drawTiles(cam) {
 
 function drawBuildings(cam) {
   buildingDefs.slice().sort((a, b) => (a.y + a.h) - (b.y + b.h)).forEach((b) => {
-    const sx = b.sprite * 64;
-    bx.drawImage(SPRITES.buildings, sx, 0, 64, 64, b.x - cam.x, b.y - cam.y, 64, 64);
+    const dx = Math.floor(b.x - cam.x);
+    const dy = Math.floor(b.y - cam.y);
+    if (EXT.kenneyFarm.ready && b.id === "greenhouse") {
+      // Kenney CC0 农场扩展包中的温室，替换原先的粗糙程序图。
+      bx.drawImage(EXT.kenneyFarm.image, 62, 72, 83, 60, dx - 8, dy + 2, 92, 66);
+    } else if (EXT.kenneyFarm.ready && b.id === "market") {
+      // 用 Kenney 的南瓜箱/木桶拼出更像样的集市摊位。
+      bx.drawImage(EXT.kenneyFarm.image, 213, 0, 38, 52, dx + 8, dy + 8, 56, 68);
+      bx.drawImage(EXT.kenneyFarm.image, 91, 1, 16, 16, dx + 1, dy + 42, 20, 20);
+      bx.drawImage(EXT.kenneyFarm.image, 107, 1, 16, 16, dx + 47, dy + 43, 20, 20);
+    } else {
+      const sx = b.sprite * 64;
+      bx.drawImage(SPRITES.buildings, sx, 0, 64, 64, dx, dy, 64, 64);
+    }
     // 名牌
     const lx = b.x - cam.x + b.w / 2;
     const ly = b.y - cam.y - 4;
     drawLabel(b.name, lx, ly);
+  });
+}
+
+function drawExternalProps(cam) {
+  if (!EXT.kenneyFarm.ready) return;
+  const img = EXT.kenneyFarm.image;
+  const props = [
+    // 木桶、工具、植物、谷物，全部来自 Kenney CC0 atlas。
+    { sx: 110, sy: 0, sw: 16, sh: 16, x: 25 * TILE, y: 23 * TILE, w: 18, h: 18 },
+    { sx: 126, sy: 0, sw: 16, sh: 16, x: 26 * TILE, y: 23 * TILE, w: 18, h: 18 },
+    { sx: 146, sy: 22, sw: 16, sh: 16, x: 33 * TILE, y: 19 * TILE, w: 18, h: 18 },
+    { sx: 164, sy: 22, sw: 16, sh: 16, x: 35 * TILE, y: 19 * TILE, w: 18, h: 18 },
+    { sx: 181, sy: 22, sw: 16, sh: 16, x: 37 * TILE, y: 19 * TILE, w: 18, h: 18 },
+    { sx: 147, sy: 55, sw: 16, sh: 16, x: 30 * TILE, y: 25 * TILE, w: 18, h: 18 },
+    { sx: 164, sy: 55, sw: 16, sh: 16, x: 31 * TILE, y: 25 * TILE, w: 18, h: 18 },
+    { sx: 181, sy: 55, sw: 16, sh: 16, x: 32 * TILE, y: 25 * TILE, w: 18, h: 18 },
+  ];
+  props.forEach((p) => {
+    const dx = Math.floor(p.x - cam.x);
+    const dy = Math.floor(p.y - cam.y);
+    if (dx < -p.w || dx > VIEW_W || dy < -p.h || dy > VIEW_H) return;
+    bx.drawImage(img, p.sx, p.sy, p.sw, p.sh, dx, dy, p.w, p.h);
   });
 }
 
@@ -1477,8 +1534,11 @@ function bindHold(button, direction) {
 
 function resizeCanvas() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  canvas.width = Math.floor(window.innerWidth * dpr);
-  canvas.height = Math.floor(window.innerHeight * dpr);
+  const rect = canvas.getBoundingClientRect();
+  const cssW = Math.max(1, Math.round(rect.width || window.innerWidth));
+  const cssH = Math.max(1, Math.round(rect.height || window.innerHeight));
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
   ctx.imageSmoothingEnabled = false;
 }
 
@@ -1547,12 +1607,19 @@ function readGamepad() {
     const ax = g.axes[0] || 0, ay = g.axes[1] || 0;
     setMove("left", ax < -0.3); setMove("right", ax > 0.3);
     setMove("up", ay < -0.3); setMove("down", ay > 0.3);
-    if (g.buttons[0]?.pressed) plant();
-    if (g.buttons[1]?.pressed) water();
-    if (g.buttons[2]?.pressed) harvest();
-    if (g.buttons[3]?.pressed) expandFarm();
+    const current = new Set();
+    g.buttons.forEach((button, index) => {
+      if (button?.pressed) current.add(index);
+    });
+    const pressedOnce = (index) => current.has(index) && !lastGamepadButtons.has(index);
+    if (pressedOnce(0)) plant();
+    if (pressedOnce(1)) water();
+    if (pressedOnce(2)) harvest();
+    if (pressedOnce(3)) expandFarm();
+    lastGamepadButtons = current;
     return;
   }
+  lastGamepadButtons.clear();
 }
 
 function initBackendForm() {
