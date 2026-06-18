@@ -1,10 +1,10 @@
-const CACHE_NAME = "survival-2d-ultimate-v4";
+const CACHE_NAME = "survival-2d-ultimate-v7";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=23",
-  "./src/styles.css?v=23",
-  "./src/game.js?v=23",
+  "./manifest.webmanifest?v=26",
+  "./src/styles.css?v=26",
+  "./src/game.js?v=26",
   "./assets/icon.svg",
   "./assets/2d/kenney/particles/flame_06.png",
   "./assets/2d/kenney/particles/smoke_07.png",

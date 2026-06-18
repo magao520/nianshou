@@ -25,7 +25,13 @@ const ui = {
 };
 
 const WORLD = 2600;
-const SAVE_KEY = "primeArk2D_v2";
+const SAVE_KEY = "primeArk2D_v4";
+const SAFE_RADIUS = 260;
+const START_SAFE_TIME = 75;
+const LAKES = [
+  { x: -330, y: -150, rx: 185, ry: 128, rot: -0.15 },
+  { x: 470, y: 520, rx: 120, ry: 80, rot: 0 },
+];
 const keys = new Set();
 const particles = [];
 const floaters = [];
@@ -49,7 +55,7 @@ let cameraShake = 0;
 let pointerAim = { x: 0, y: 0 };
 let joystick = { x: 0, y: 0 };
 let camera = { x: 0, y: 0, zoom: 1 };
-let graceTimer = 12;
+let graceTimer = START_SAFE_TIME;
 
 const player = {
   x: 0,
@@ -104,36 +110,71 @@ function initWorld() {
   decals.length = 0;
   ripples.length = 0;
 
-  const rngPoints = (count, minR, maxR) => {
+  const rngPoints = (count, minR, maxR, options = {}) => {
     const pts = [];
-    for (let i = 0; i < count; i += 1) {
+    let guard = 0;
+    while (pts.length < count && guard < count * 80) {
+      guard += 1;
       const a = rand(0, TAU);
       const r = rand(minR, maxR);
-      pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+      const p = { x: Math.cos(a) * r, y: Math.sin(a) * r };
+      if (isValidLandPoint(p.x, p.y, options)) pts.push(p);
     }
     return pts;
   };
 
-  rngPoints(90, 180, 1080).forEach((p, i) => {
+  rngPoints(72, 260, 1080, { avoidCamp: true, avoidWater: true }).forEach((p, i) => {
     resources.push({ id: `tree-${i}`, type: "tree", x: p.x, y: p.y, r: rand(24, 42), hp: 3, maxHp: 3, sway: rand(0, TAU) });
   });
-  rngPoints(42, 220, 1040).forEach((p, i) => {
+  rngPoints(34, 260, 1040, { avoidCamp: true, avoidWater: true }).forEach((p, i) => {
     resources.push({ id: `rock-${i}`, type: "rock", x: p.x, y: p.y, r: rand(20, 34), hp: 3, maxHp: 3, rot: rand(0, TAU) });
   });
-  rngPoints(46, 130, 940).forEach((p, i) => {
+  rngPoints(40, 210, 940, { avoidCamp: true, avoidWater: true }).forEach((p, i) => {
     resources.push({ id: `bush-${i}`, type: "bush", x: p.x, y: p.y, r: rand(18, 28), hp: 1, maxHp: 1, sway: rand(0, TAU) });
   });
-  rngPoints(180, 80, 1120).forEach((p) => decals.push({ type: Math.random() < 0.7 ? "grass" : "flower", x: p.x, y: p.y, s: rand(0.6, 1.4), a: rand(0, TAU) }));
+  rngPoints(150, 80, 1120, { avoidWater: true }).forEach((p) => {
+    const flower = Math.random() >= 0.72;
+    decals.push({
+      type: flower ? "flower" : "grass",
+      x: p.x,
+      y: p.y,
+      s: rand(0.6, 1.4),
+      a: rand(0, TAU),
+      color: flower ? (Math.random() < 0.5 ? "#e8d653" : "#f1a7d5") : "#74a95b",
+    });
+  });
   [
-    { type: "raptor", x: 920, y: 560 },
-    { type: "raptor", x: -980, y: -620 },
-    { type: "raptor", x: 260, y: -980 },
-    { type: "trike", x: -380, y: 580 },
-    { type: "trike", x: 650, y: -520 },
-    { type: "stego", x: -780, y: 120 },
+    { type: "bush", x: 185, y: -40, r: 22, hp: 1, maxHp: 1, sway: rand(0, TAU), id: "starter-bush-a" },
+    { type: "tree", x: 235, y: 105, r: 30, hp: 3, maxHp: 3, sway: rand(0, TAU), id: "starter-tree-a" },
+    { type: "rock", x: -210, y: 160, r: 24, hp: 3, maxHp: 3, rot: rand(0, TAU), id: "starter-rock-a" },
+  ].forEach((r) => resources.push(r));
+  [
+    { type: "raptor", x: 1040, y: 650 },
+    { type: "raptor", x: -1080, y: -720 },
+    { type: "raptor", x: 320, y: -1080 },
+    { type: "trike", x: -760, y: 640 },
+    { type: "trike", x: 860, y: -650 },
+    { type: "stego", x: -1020, y: 280 },
   ].forEach(spawnDino);
   buildings.push({ type: "campfire", x: 70, y: 70, hp: 100, built: true });
   buildings.push({ type: "hut", x: -80, y: 65, hp: 140, built: true });
+}
+
+function isValidLandPoint(x, y, options = {}) {
+  if (Math.hypot(x, y) > WORLD * 0.45) return false;
+  if (options.avoidCamp && Math.hypot(x, y) < SAFE_RADIUS) return false;
+  if (options.avoidWater && LAKES.some((lake) => inEllipse(x, y, lake, 42))) return false;
+  return true;
+}
+
+function inEllipse(x, y, lake, margin = 0) {
+  const cos = Math.cos(-lake.rot);
+  const sin = Math.sin(-lake.rot);
+  const dx = x - lake.x;
+  const dy = y - lake.y;
+  const lx = dx * cos - dy * sin;
+  const ly = dx * sin + dy * cos;
+  return (lx * lx) / ((lake.rx + margin) ** 2) + (ly * ly) / ((lake.ry + margin) ** 2) < 1;
 }
 
 function spawnDino(d) {
@@ -146,9 +187,13 @@ function spawnDino(d) {
 }
 
 function randomLandPoint() {
-  const a = rand(0, TAU);
-  const r = rand(180, 1020);
-  return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+  for (let i = 0; i < 80; i += 1) {
+    const a = rand(0, TAU);
+    const r = rand(320, 1050);
+    const p = { x: Math.cos(a) * r, y: Math.sin(a) * r };
+    if (isValidLandPoint(p.x, p.y, { avoidCamp: true, avoidWater: true })) return p;
+  }
+  return { x: 800, y: 600 };
 }
 
 function resizeCanvas() {
@@ -163,12 +208,16 @@ function startGame() {
   startScreen.classList.remove("active");
   gameScreen.classList.remove("hidden");
   loadSave();
+  if (Math.hypot(player.x, player.y) > 420) {
+    player.x = 0;
+    player.y = 0;
+  }
   if (player.hp < 70) {
     player.hp = 100;
     player.hunger = Math.max(player.hunger, 90);
     player.thirst = Math.max(player.thirst, 90);
   }
-  graceTimer = 12;
+  graceTimer = START_SAFE_TIME;
   started = true;
   resizeCanvas();
   showToast("2D 极致版：活下去，建营地，猎恐龙。");
@@ -232,6 +281,13 @@ function updateDinos(dt) {
     let tx = d.target.x;
     let ty = d.target.y;
     let speed = d.speed;
+    if (graceTimer > 0 && pd < 620) {
+      const away = Math.atan2(d.y - player.y, d.x - player.x);
+      d.x += Math.cos(away) * Math.max(speed, 120) * dt;
+      d.y += Math.sin(away) * Math.max(speed, 120) * dt;
+      d.target = randomLandPoint();
+      return;
+    }
     if (d.type === "raptor" && pd < d.aggro && graceTimer <= 0) {
       d.state = "hunt";
       tx = player.x; ty = player.y; speed *= 1.18;
@@ -336,7 +392,7 @@ function gather() {
 }
 
 function drinkOrEat() {
-  if (Math.hypot(player.x + 330, player.y + 150) < 180 || weather === "rain") {
+  if (LAKES.some((lake) => inEllipse(player.x, player.y, lake, 20)) || weather === "rain") {
     player.thirst = 100;
     showToast(weather === "rain" ? "雨水让你补充了水分。" : "喝下湖水，口渴恢复。");
     ripple(player.x, player.y);
@@ -463,19 +519,19 @@ function drawWorld() {
     }
   }
   ctx.globalAlpha = 1;
-  drawLake(-330, -150, 185, 128);
-  drawLake(470, 520, 120, 80);
+  LAKES.forEach(drawLake);
   decals.forEach(drawDecal);
 }
 
-function drawLake(x, y, rx, ry) {
+function drawLake(lake) {
+  const { x, y, rx, ry, rot } = lake;
   const water = ctx.createRadialGradient(x - rx * 0.2, y - ry * 0.2, 10, x, y, rx);
   water.addColorStop(0, "#57c7e8");
   water.addColorStop(0.65, "#2485c5");
   water.addColorStop(1, "#17618c");
   ctx.fillStyle = water;
   ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, -0.15, 0, TAU);
+  ctx.ellipse(x, y, rx, ry, rot, 0, TAU);
   ctx.fill();
   ctx.strokeStyle = "rgba(238,225,170,.75)";
   ctx.lineWidth = 12;
@@ -484,7 +540,7 @@ function drawLake(x, y, rx, ry) {
   ctx.lineWidth = 2;
   for (let i = 0; i < 7; i += 1) {
     ctx.beginPath();
-    ctx.ellipse(x + Math.sin(time + i) * rx * 0.45, y + Math.cos(time * 0.7 + i) * ry * 0.38, rx * 0.18, ry * 0.025, 0, 0, TAU);
+    ctx.ellipse(x + Math.sin(time + i) * rx * 0.45, y + Math.cos(time * 0.7 + i) * ry * 0.38, rx * 0.18, ry * 0.025, rot, 0, TAU);
     ctx.stroke();
   }
 }
@@ -495,10 +551,10 @@ function drawDecal(d) {
   ctx.rotate(d.a + Math.sin(time + d.x) * 0.05);
   ctx.scale(d.s, d.s);
   if (d.type === "flower") {
-    ctx.fillStyle = Math.random() < 0.5 ? "#e8d653" : "#f1a7d5";
+    ctx.fillStyle = d.color;
     ctx.fillRect(-2, -2, 4, 4);
   } else {
-    ctx.strokeStyle = "#74a95b";
+    ctx.strokeStyle = d.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(0, 4); ctx.lineTo(-4, -3); ctx.moveTo(0, 4); ctx.lineTo(4, -4); ctx.stroke();
@@ -507,7 +563,10 @@ function drawDecal(d) {
 }
 
 function drawObjects() {
-  const drawables = [...resources, ...buildings, ...dinos, player].sort((a, b) => (a.y + (a.r || 0)) - (b.y + (b.r || 0)));
+  const visibleDinos = graceTimer > 0
+    ? dinos.filter((d) => Math.hypot(d.x - player.x, d.y - player.y) > 780)
+    : dinos;
+  const drawables = [...resources, ...buildings, ...visibleDinos, player].sort((a, b) => (a.y + (a.r || 0)) - (b.y + (b.r || 0)));
   drawables.forEach((o) => {
     if (o === player) drawPlayer();
     else if (o.hp !== undefined && o.type && ["raptor", "trike", "stego"].includes(o.type)) drawDino(o);
