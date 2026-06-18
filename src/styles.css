@@ -585,6 +585,83 @@ canvas {
   font-weight: 900;
 }
 
+.rpg-panel {
+  position: absolute;
+  z-index: 24;
+  left: 14px;
+  right: 14px;
+  top: 92px;
+  max-height: 58%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 22px;
+  color: var(--cream);
+  background: rgba(8, 20, 15, 0.86);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.rpg-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.rpg-panel header button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: white;
+  background: rgba(255,255,255,.14);
+  font-size: 20px;
+}
+
+.panel-body {
+  max-height: 340px;
+  overflow: auto;
+  padding: 12px;
+  display: grid;
+  gap: 9px;
+}
+
+.bag-row,
+.shop-row,
+.quest-row {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(255,255,255,.07);
+}
+
+.bag-row {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.shop-row {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.shop-row small,
+.quest-row small,
+.quest-row p {
+  color: rgba(255, 243, 212, 0.72);
+  margin: 0;
+}
+
+.panel-action {
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #102017;
+  background: var(--gold);
+  font-weight: 900;
+}
+
 .rotate-tip {
   display: none;
 }

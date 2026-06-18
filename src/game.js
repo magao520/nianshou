@@ -75,13 +75,17 @@ const toastEl = $("#toast");
 const ui = {
   coin: $("#coinText"),
   level: $("#levelText"),
-  water: $("#waterText"),
+  energy: $("#energyText"),
+  date: $("#dateText"),
   room: $("#roomText"),
   sync: $("#syncStatus"),
   cropBar: $("#cropBar"),
   chatPanel: $("#chatPanel"),
   chatMessages: $("#chatMessages"),
   chatInput: $("#chatInput"),
+  panel: $("#rpgPanel"),
+  panelTitle: $("#panelTitle"),
+  panelBody: $("#panelBody"),
 };
 
 // 内部像素画布
@@ -894,6 +898,25 @@ const crops = [
   { id: "pumpkin", name: "月亮南瓜", col: 2, cost: 16, value: 48, grow: 38, xp: 14, water: 13 },
   { id: "corn", name: "金穗玉米", col: 3, cost: 22, value: 64, grow: 46, xp: 20, water: 15 },
 ];
+const cropById = Object.fromEntries(crops.map((c) => [c.id, c]));
+const seasons = ["春", "夏", "秋", "冬"];
+const npcs = [
+  { id: "lin", name: "林妮", role: "种子店主", x: 15 * TILE, y: 12 * TILE, color: "#ffd166", lines: ["今天的种子很新鲜。", "水分会让作物快很多。"] },
+  { id: "bo", name: "柏叔", role: "矿工", x: 36 * TILE, y: 11 * TILE, color: "#9aa3ad", lines: ["矿洞里有石材和旧硬币。", "体力不够就别硬撑。"] },
+  { id: "mira", name: "米拉", role: "钓手", x: 47 * TILE, y: 29 * TILE, color: "#6cd0ff", lines: ["池塘早晨更容易上鱼。", "钓到的鱼可以直接卖。"] },
+];
+const zones = [
+  { id: "shop", name: "种子店", type: "shop", x: 14 * TILE, y: 12 * TILE, r: 34 },
+  { id: "pond", name: "池塘", type: "fish", x: 48 * TILE, y: 30 * TILE, r: 60 },
+  { id: "mine", name: "旧矿洞", type: "mine", x: 36 * TILE, y: 8 * TILE, r: 42 },
+  { id: "home", name: "农舍", type: "home", x: 8 * TILE, y: 12 * TILE, r: 42 },
+  { id: "bin", name: "出货箱", type: "shipping", x: 11 * TILE, y: 14 * TILE, r: 30 },
+];
+const questDefs = [
+  { id: "firstHarvest", title: "第一份收成", text: "收获任意 3 个作物", target: 3, reward: 80 },
+  { id: "angler", title: "池塘初体验", text: "钓到 2 条鱼", target: 2, reward: 60 },
+  { id: "miner", title: "旧矿洞试探", text: "在矿洞采到 4 份石材", target: 4, reward: 70 },
+];
 
 // ---------- 田地 ----------
 function createPlots() {
@@ -918,6 +941,15 @@ function createPlots() {
   return plots;
 }
 
+function createForageNodes() {
+  return [
+    { id: "berry-1", item: "wildBerry", name: "野莓", x: 6 * TILE, y: 28 * TILE, ready: true, respawnAt: 0 },
+    { id: "berry-2", item: "wildBerry", name: "野莓", x: 17 * TILE, y: 30 * TILE, ready: true, respawnAt: 0 },
+    { id: "wood-1", item: "wood", name: "树枝", x: 4 * TILE, y: 18 * TILE, ready: true, respawnAt: 0 },
+    { id: "wood-2", item: "wood", name: "树枝", x: 22 * TILE, y: 33 * TILE, ready: true, respawnAt: 0 },
+  ];
+}
+
 // ---------- 状态 ----------
 const savedBackend = JSON.parse(localStorage.getItem("cloudFarmBackend") || "{}");
 let selectedCrop = crops[0].id;
@@ -937,15 +969,36 @@ let selectedPlotId = null;
 
 function createInitialState() {
   return {
-    version: 5,
+    version: 6,
     room: "PUBLIC-FARM",
     updatedAt: now(),
     dayTime: 0.18,
+    day: 1,
+    season: 0,
     coins: 60,
     xp: 0,
     level: 1,
-    water: 100,
+    energy: 100,
+    maxEnergy: 100,
     expansion: 0,
+    inventory: {
+      radishSeed: 8,
+      tomatoSeed: 2,
+      radish: 0,
+      tomato: 0,
+      pumpkin: 0,
+      corn: 0,
+      wildBerry: 0,
+      fish: 0,
+      stone: 0,
+      wood: 0,
+    },
+    stats: { harvested: 0, fish: 0, mined: 0, foraged: 0, shipped: 0 },
+    relationships: Object.fromEntries(npcs.map((n) => [n.id, 0])),
+    quests: Object.fromEntries(questDefs.map((q) => [q.id, { progress: 0, done: false, claimed: false }])),
+    forage: createForageNodes(),
+    mineDepth: 1,
+    shippingValue: 0,
     player: {
       id: getClientId(),
       name: "菜园主",
@@ -985,9 +1038,17 @@ function loadLocal(room) {
 
 function normalizeState(data) {
   const base = createInitialState();
+  const mergedQuests = { ...base.quests, ...(data.quests || {}) };
   return {
     ...base,
     ...data,
+    inventory: { ...base.inventory, ...(data.inventory || {}) },
+    stats: { ...base.stats, ...(data.stats || {}) },
+    relationships: { ...base.relationships, ...(data.relationships || {}) },
+    quests: mergedQuests,
+    forage: normalizeForage(data.forage, base.forage),
+    energy: Number.isFinite(data.energy) ? data.energy : (data.water ?? base.energy),
+    maxEnergy: data.maxEnergy || base.maxEnergy,
     player: { ...base.player, ...(data.player || {}), id: getClientId(), lastSeen: now(), anim: base.player.anim },
     visitors: data.visitors || {},
     chat: Array.isArray(data.chat) ? data.chat.slice(-60) : [],
@@ -998,6 +1059,11 @@ function normalizeState(data) {
 function normalizePlots(savedPlots, basePlots) {
   const saved = new Map((savedPlots || []).map((p) => [p.id, p]));
   return basePlots.map((b, i) => ({ ...b, ...(saved.get(b.id) || savedPlots?.[i] || {}) }));
+}
+
+function normalizeForage(savedForage, baseForage) {
+  const saved = new Map((savedForage || []).map((p) => [p.id, p]));
+  return baseForage.map((b) => ({ ...b, ...(saved.get(b.id) || {}) }));
 }
 
 // ---------- 玩家 / 物理 ----------
@@ -1055,12 +1121,15 @@ function update(dt) {
   player.y = clamp(player.y, 0, WORLD_H - 16);
   player.lastSeen = now();
 
-  // 资源恢复
-  game.water = clamp(game.water + dt * 2.2, 0, 100);
+  // 时间与农田状态
   game.plots.forEach((p) => {
     if (p.crop) p.moisture = clamp((p.moisture || 0) - dt * 0.85, 0, 100);
   });
-  game.dayTime = (game.dayTime + dt * 0.008) % 1;
+  game.dayTime += dt * 0.006;
+  if (game.dayTime >= 0.94) {
+    showToast("夜深了，自动回家休息");
+    sleepDay();
+  }
   game.updatedAt = now();
   if (actionFlash > 0) actionFlash -= dt;
 
@@ -1119,15 +1188,19 @@ function plant() {
   const t = getNearestPlot();
   if (!t || t.dist > 24) return showToast("靠近一块空地再播种", "bad");
   const plot = t.plot;
+  if (plot.locked) return showToast("这块地还没开垦", "bad");
   if (plot.crop) return showToast("这块地已经种下作物了", "bad");
-  const crop = crops.find((c) => c.id === selectedCrop);
-  if (game.coins < crop.cost) return showToast(`金币不足，需要 ${crop.cost}`, "bad");
-  game.coins -= crop.cost;
+  const crop = cropById[selectedCrop];
+  const seed = `${crop.id}Seed`;
+  if ((game.inventory[seed] || 0) <= 0) return showToast(`${crop.name}种子不足，去种子店买`, "bad");
+  if (!spendEnergy(3, "播种")) return;
+  game.inventory[seed] -= 1;
   plot.crop = crop.id;
   plot.plantedAt = now();
   plot.wateredAt = 0;
   plot.moisture = Math.max(plot.moisture || 0, 28);
   addLog(`${game.player.name} 种下了 ${crop.name}`);
+  renderCropBar();
   Sfx.play("plant");
   actionFlash = 0.2;
   saveLocal();
@@ -1138,9 +1211,8 @@ function water() {
   if (!t || t.dist > 24) return showToast("靠近作物再浇水", "bad");
   const plot = t.plot;
   if (!plot.crop) return showToast("这块地还没有作物", "bad");
-  const crop = crops.find((c) => c.id === plot.crop);
-  if (game.water < crop.water) return showToast(`水量不足，需要 ${crop.water}`, "bad");
-  game.water -= crop.water;
+  const crop = cropById[plot.crop];
+  if (!spendEnergy(Math.ceil(crop.water / 2), "浇水")) return;
   plot.wateredAt = now();
   plot.moisture = clamp((plot.moisture || 0) + 45, 0, 100);
   plot.fertility = clamp((plot.fertility || 1) + 0.015, 0.75, 1.35);
@@ -1157,21 +1229,22 @@ function harvest() {
   if (!plot.crop) return showToast("这里还没有可收获的作物", "bad");
   const progress = getCropProgress(plot);
   if (progress < 1) {
-    const crop = crops.find((c) => c.id === plot.crop);
+    const crop = cropById[plot.crop];
     return showToast(`还需要 ${Math.ceil((1 - progress) * crop.grow)} 秒成熟`, "bad");
   }
-  const crop = crops.find((c) => c.id === plot.crop);
-  const combo = 1 + Math.min(0.4, plot.harvests * 0.04);
-  const gain = Math.round(crop.value * combo);
-  game.coins += gain;
+  const crop = cropById[plot.crop];
+  if (!spendEnergy(4, "收获")) return;
   game.xp += crop.xp;
   game.level = Math.max(1, Math.floor(Math.sqrt(game.xp / 18)) + 1);
+  game.inventory[crop.id] = (game.inventory[crop.id] || 0) + 1;
+  game.stats.harvested += 1;
+  bumpQuest("firstHarvest", 1);
   plot.crop = null;
   plot.harvests += 1;
   plot.moisture = clamp((plot.moisture || 0) - 20, 0, 100);
   plot.fertility = clamp((plot.fertility || 1) - 0.025, 0.75, 1.35);
-  addLog(`${game.player.name} 收获 ${crop.name}，获得 ${gain} 金币`);
-  showToast(`收获成功 +${gain} 金币`);
+  addLog(`${game.player.name} 收获了 ${crop.name}`);
+  showToast(`${crop.name} 已放入背包`);
   Sfx.play("harvest");
   actionFlash = 0.25;
   saveLocal();
@@ -1192,12 +1265,233 @@ function expandFarm() {
   saveLocal();
 }
 
+function spendEnergy(cost, actionName) {
+  if (game.energy < cost) {
+    showToast(`体力不足，无法${actionName}。回家睡觉可恢复`, "bad");
+    return false;
+  }
+  game.energy = clamp(game.energy - cost, 0, game.maxEnergy);
+  return true;
+}
+
+function addItem(id, count = 1) {
+  game.inventory[id] = (game.inventory[id] || 0) + count;
+}
+
+function bumpQuest(id, amount = 1) {
+  const q = game.quests[id];
+  const def = questDefs.find((item) => item.id === id);
+  if (!q || !def || q.done) return;
+  q.progress = clamp((q.progress || 0) + amount, 0, def.target);
+  if (q.progress >= def.target) {
+    q.done = true;
+    showToast(`任务完成：${def.title}`);
+  }
+}
+
+function itemName(id) {
+  const crop = cropById[id];
+  if (crop) return crop.name;
+  const seedCrop = crops.find((c) => `${c.id}Seed` === id);
+  if (seedCrop) return `${seedCrop.name}种子`;
+  return { wildBerry: "野莓", fish: "溪鱼", stone: "石材", wood: "木材" }[id] || id;
+}
+
+function sellValue(id) {
+  const crop = cropById[id];
+  if (crop) return crop.value;
+  return { wildBerry: 18, fish: 35, stone: 4, wood: 3 }[id] || 0;
+}
+
+function openPanel(title, html) {
+  ui.panelTitle.textContent = title;
+  ui.panelBody.innerHTML = html;
+  ui.panel.classList.remove("hidden");
+}
+
+function closePanel() {
+  ui.panel.classList.add("hidden");
+}
+
+function openBag() {
+  const rows = Object.entries(game.inventory)
+    .filter(([, count]) => count > 0)
+    .map(([id, count]) => `<div class="bag-row"><span>${itemName(id)}</span><strong>×${count}</strong></div>`)
+    .join("") || `<p>背包是空的。</p>`;
+  openPanel("背包", `<div class="bag-list">${rows}</div><button class="panel-action" data-action="shipping">出货可售物</button>`);
+}
+
+function openQuests() {
+  const rows = questDefs.map((def) => {
+    const q = game.quests[def.id] || { progress: 0, done: false, claimed: false };
+    const button = q.done && !q.claimed ? `<button class="panel-action" data-claim="${def.id}">领取 ${def.reward} 金</button>` : "";
+    return `<div class="quest-row"><strong>${def.title}</strong><p>${def.text}</p><small>${q.progress || 0}/${def.target}${q.claimed ? " · 已领取" : q.done ? " · 完成" : ""}</small>${button}</div>`;
+  }).join("");
+  openPanel("任务手册", rows);
+}
+
+function openShop() {
+  const rows = crops.map((crop) => `
+    <div class="shop-row">
+      <span>${crop.name}种子</span>
+      <small>${crop.cost} 金 / 售价 ${crop.value} 金</small>
+      <button class="panel-action" data-buy="${crop.id}">购买</button>
+    </div>`).join("");
+  openPanel("林妮的种子店", rows);
+}
+
+function openShipping() {
+  const sellable = Object.entries(game.inventory).filter(([id, count]) => count > 0 && sellValue(id) > 0);
+  const total = sellable.reduce((sum, [id, count]) => sum + sellValue(id) * count, 0);
+  const rows = sellable.map(([id, count]) => `<div class="bag-row"><span>${itemName(id)} ×${count}</span><strong>${sellValue(id) * count} 金</strong></div>`).join("") || "<p>没有可出售物。</p>";
+  openPanel("出货箱", `${rows}<button class="panel-action" data-action="shipping">全部出货 ${total} 金</button>`);
+}
+
+function sellAll() {
+  let total = 0;
+  Object.keys(game.inventory).forEach((id) => {
+    const value = sellValue(id);
+    if (value > 0 && game.inventory[id] > 0) {
+      total += value * game.inventory[id];
+      game.inventory[id] = 0;
+    }
+  });
+  if (!total) return showToast("没有可出售物", "bad");
+  game.coins += total;
+  game.stats.shipped += total;
+  addLog(`出货获得 ${total} 金币`);
+  showToast(`出货 +${total} 金币`);
+  closePanel();
+  saveLocal();
+}
+
+function buySeed(cropId) {
+  const crop = cropById[cropId];
+  if (!crop) return;
+  if (game.coins < crop.cost) return showToast("金币不足", "bad");
+  game.coins -= crop.cost;
+  addItem(`${crop.id}Seed`, 1);
+  showToast(`购买 ${crop.name}种子 ×1`);
+  openShop();
+  renderCropBar();
+  saveLocal();
+}
+
+function claimQuest(id) {
+  const def = questDefs.find((q) => q.id === id);
+  const q = game.quests[id];
+  if (!def || !q?.done || q.claimed) return;
+  q.claimed = true;
+  game.coins += def.reward;
+  showToast(`领取奖励 +${def.reward} 金`);
+  openQuests();
+  saveLocal();
+}
+
+function sleepDay() {
+  const shipping = game.shippingValue || 0;
+  game.day += 1;
+  if (game.day > 28) {
+    game.day = 1;
+    game.season = (game.season + 1) % seasons.length;
+  }
+  game.dayTime = 0.18;
+  game.energy = game.maxEnergy;
+  game.shippingValue = 0;
+  game.forage.forEach((f) => { f.ready = true; f.respawnAt = 0; });
+  game.plots.forEach((p) => { if (!p.crop) p.moisture = Math.max(0, (p.moisture || 0) - 18); });
+  showToast(`新的一天：${seasons[game.season]} ${game.day}日${shipping ? `，出货 +${shipping}` : ""}`);
+  closePanel();
+  saveLocal();
+}
+
 function getCropProgress(plot) {
   if (!plot.crop) return 0;
-  const crop = crops.find((c) => c.id === plot.crop);
+  const crop = cropById[plot.crop];
   const moistureBoost = 0.72 + clamp(plot.moisture || 0, 0, 100) / 100 * 0.55;
   const fertilityBoost = clamp(plot.fertility || 1, 0.75, 1.35);
   return clamp(((now() - plot.plantedAt) / 1000 / crop.grow) * moistureBoost * fertilityBoost, 0, 1);
+}
+
+function interact() {
+  const nearNpc = nearestNpc(28);
+  if (nearNpc) return talkToNpc(nearNpc);
+  const forage = nearestForage(24);
+  if (forage) return collectForage(forage);
+  const zone = nearestZone(48);
+  if (!zone) return showToast("附近没有可交互目标", "bad");
+  if (zone.type === "shop") return openShop();
+  if (zone.type === "fish") return fish();
+  if (zone.type === "mine") return mine();
+  if (zone.type === "home") return sleepDay();
+  if (zone.type === "shipping") return openShipping();
+}
+
+function nearestNpc(range = 32) {
+  return npcs.map((n) => ({ ...n, d: Math.hypot(n.x - game.player.x, n.y - game.player.y) }))
+    .sort((a, b) => a.d - b.d).find((n) => n.d <= range);
+}
+
+function nearestZone(range = 40) {
+  return zones.map((z) => ({ ...z, d: Math.hypot(z.x - game.player.x, z.y - game.player.y) }))
+    .sort((a, b) => a.d - b.d).find((z) => z.d <= Math.max(range, z.r));
+}
+
+function nearestForage(range = 24) {
+  const t = now();
+  game.forage.forEach((f) => {
+    if (!f.ready && f.respawnAt && t > f.respawnAt) f.ready = true;
+  });
+  return game.forage.map((f) => ({ ...f, d: Math.hypot(f.x - game.player.x, f.y - game.player.y) }))
+    .sort((a, b) => a.d - b.d).find((f) => f.ready && f.d <= range);
+}
+
+function talkToNpc(npc) {
+  game.relationships[npc.id] = (game.relationships[npc.id] || 0) + 1;
+  const line = npc.lines[(game.relationships[npc.id] - 1) % npc.lines.length];
+  openPanel(`${npc.name} · ${npc.role}`, `<p>${line}</p><p>好感：${game.relationships[npc.id]}</p>`);
+  Sfx.play("ui");
+  saveLocal();
+}
+
+function collectForage(node) {
+  if (!spendEnergy(2, "采集")) return;
+  const real = game.forage.find((f) => f.id === node.id);
+  real.ready = false;
+  real.respawnAt = now() + 45000;
+  addItem(real.item, 1);
+  game.stats.foraged += 1;
+  showToast(`采集到 ${real.name}`);
+  Sfx.play("harvest");
+  saveLocal();
+}
+
+function fish() {
+  if (!spendEnergy(10, "钓鱼")) return;
+  const catchCount = Math.random() < 0.72 ? 1 : 0;
+  if (catchCount) {
+    addItem("fish", 1);
+    game.stats.fish += 1;
+    bumpQuest("angler", 1);
+    showToast("钓到一条溪鱼");
+    Sfx.play("harvest");
+  } else {
+    showToast("鱼跑掉了，再试一次");
+    Sfx.play("water");
+  }
+  saveLocal();
+}
+
+function mine() {
+  if (!spendEnergy(12, "挖矿")) return;
+  const stone = 1 + Math.floor(Math.random() * 3);
+  addItem("stone", stone);
+  game.stats.mined += stone;
+  game.mineDepth = Math.max(game.mineDepth, 1 + Math.floor(game.stats.mined / 8));
+  bumpQuest("miner", stone);
+  showToast(`矿洞获得石材 ×${stone}`);
+  Sfx.play("expand");
+  saveLocal();
 }
 
 function addLog(message) {
@@ -1226,6 +1520,7 @@ function render() {
   drawTiles(camera);
   drawBuildings(camera);
   drawWorldProps(camera);
+  drawRpgWorld(camera);
   drawPlots(camera);
   drawCrops(camera);
 
@@ -1404,6 +1699,51 @@ function drawCrops(cam) {
   });
 }
 
+function drawRpgWorld(cam) {
+  zones.forEach((z) => {
+    const x = Math.floor(z.x - cam.x);
+    const y = Math.floor(z.y - cam.y);
+    if (x < -40 || x > VIEW_W + 40 || y < -40 || y > VIEW_H + 40) return;
+    bx.fillStyle = z.type === "fish" ? "rgba(108,208,255,.25)" : z.type === "mine" ? "rgba(80,80,90,.25)" : "rgba(255,209,102,.20)";
+    bx.beginPath();
+    bx.arc(x, y, z.type === "fish" ? 15 : 10, 0, Math.PI * 2);
+    bx.fill();
+    drawLabel(z.name, x, y - 12);
+  });
+
+  (game.forage || []).forEach((f) => {
+    if (!f.ready) return;
+    const x = Math.floor(f.x - cam.x);
+    const y = Math.floor(f.y - cam.y);
+    if (x < -20 || x > VIEW_W + 20 || y < -20 || y > VIEW_H + 20) return;
+    bx.fillStyle = f.item === "wood" ? "#8b5a2b" : "#ff6f8e";
+    bx.beginPath();
+    bx.arc(x, y, 4, 0, Math.PI * 2);
+    bx.fill();
+    bx.strokeStyle = "#fff3a7";
+    bx.strokeRect(x - 5, y - 5, 10, 10);
+  });
+
+  npcs.forEach((n) => drawNpc(n, cam));
+}
+
+function drawNpc(n, cam) {
+  const x = Math.floor(n.x - cam.x);
+  const y = Math.floor(n.y - cam.y);
+  if (x < -20 || x > VIEW_W + 20 || y < -28 || y > VIEW_H + 20) return;
+  bx.fillStyle = "rgba(0,0,0,.35)";
+  bx.beginPath();
+  bx.ellipse(x, y + 7, 6, 2, 0, 0, Math.PI * 2);
+  bx.fill();
+  bx.fillStyle = n.color;
+  bx.fillRect(x - 5, y - 12, 10, 14);
+  bx.fillStyle = PAL.skin;
+  bx.fillRect(x - 4, y - 18, 8, 7);
+  bx.fillStyle = "#402818";
+  bx.fillRect(x - 4, y - 19, 8, 2);
+  drawLabel(n.name, x, y - 22);
+}
+
 function drawPlayer(p, cam, isSelf) {
   const dirRow = { down: 0, left: 1, right: 2, up: 3 }[p.facing] || 0;
   const frame = p.anim?.frame || 0;
@@ -1520,7 +1860,8 @@ function drawMiniMap(cam) {
 function updateHud() {
   ui.coin.textContent = Math.floor(game.coins);
   ui.level.textContent = game.level;
-  ui.water.textContent = Math.floor(game.water);
+  ui.energy.textContent = Math.floor(game.energy);
+  ui.date.textContent = `${seasons[game.season]}${game.day}`;
   ui.room.textContent = game.room;
 }
 
@@ -1535,7 +1876,7 @@ function renderCropBar() {
     const icx = ico.getContext("2d");
     icx.imageSmoothingEnabled = false;
     if (SPRITES.crops) icx.drawImage(SPRITES.crops, crop.col * 16, 3 * 16, 16, 16, 0, 0, 16, 16);
-    button.innerHTML = `<span class="ico"></span><strong>${crop.name}</strong><small>${crop.cost} 金</small>`;
+    button.innerHTML = `<span class="ico"></span><strong>${crop.name}</strong><small>种子 ${game.inventory[`${crop.id}Seed`] || 0}</small>`;
     button.querySelector(".ico").style.backgroundImage = `url(${ico.toDataURL()})`;
     button.title = crop.name;
     button.addEventListener("click", () => {
@@ -1708,7 +2049,9 @@ function mergeRemote(remote) {
     coins: Math.max(game.coins, remote.coins || 0),
     xp: Math.max(game.xp, remote.xp || 0),
     level: Math.max(game.level, remote.level || 1),
-    water: Math.max(game.water, remote.water || 0),
+    energy: Math.max(game.energy, remote.energy || 0),
+    inventory: { ...(remote.inventory || {}), ...(game.inventory || {}) },
+    quests: { ...(remote.quests || {}), ...(game.quests || {}) },
     chat: mergeChat(game.chat || [], remote.chat || []),
     plots: game.plots.map((p) => {
       const r = map.get(p.id); if (!r) return p;
@@ -1899,7 +2242,19 @@ function bindEvents() {
   $("#plantBtn").addEventListener("click", plant);
   $("#waterBtn").addEventListener("click", water);
   $("#harvestBtn").addEventListener("click", harvest);
-  $("#shopBtn").addEventListener("click", expandFarm);
+  $("#shopBtn").addEventListener("click", interact);
+  $("#bagBtn").addEventListener("click", openBag);
+  $("#questBtn").addEventListener("click", openQuests);
+  $("#sleepBtn").addEventListener("click", sleepDay);
+  $("#panelClose").addEventListener("click", closePanel);
+  ui.panelBody.addEventListener("click", (e) => {
+    const buy = e.target.closest("[data-buy]")?.dataset.buy;
+    const claim = e.target.closest("[data-claim]")?.dataset.claim;
+    const action = e.target.closest("[data-action]")?.dataset.action;
+    if (buy) buySeed(buy);
+    if (claim) claimQuest(claim);
+    if (action === "shipping") sellAll();
+  });
   $("#toolToggle").addEventListener("click", () => {
     const controls = $("#controlsPanel");
     const cropBar = $("#cropBar");
@@ -1934,7 +2289,9 @@ function bindEvents() {
     if (k === "j") plant();
     if (k === "k") water();
     if (k === "l") harvest();
-    if (k === "u") expandFarm();
+    if (k === "u") interact();
+    if (k === "b") openBag();
+    if (k === "q") openQuests();
     if (k === "enter") $("#chatToggle").click();
   });
   window.addEventListener("keyup", (e) => {

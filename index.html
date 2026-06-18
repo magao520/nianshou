@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#13251d" />
-    <title>云上菜园 · 横板联机种菜</title>
+    <title>星之菜园 · 竖屏田园 RPG</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=11" />
-    <link rel="stylesheet" href="./src/styles.css?v=11" />
+    <link rel="manifest" href="./manifest.webmanifest?v=12" />
+    <link rel="stylesheet" href="./src/styles.css?v=12" />
   </head>
   <body>
     <main id="app">
       <section id="startScreen" class="screen active">
         <div class="hero-card">
-          <p class="eyebrow">横板联机种菜手游原型</p>
-          <h1>云上菜园</h1>
-          <p class="subtitle">种植、浇水、收获、升级，与好友共享同一片云端农场。</p>
+          <p class="eyebrow">竖屏田园生活 RPG 原型</p>
+          <h1>星之菜园</h1>
+          <p class="subtitle">种田、采集、钓鱼、下矿、交朋友、接任务，把荒地慢慢经营成自己的小镇农场。</p>
           <div class="start-grid">
             <label>
               玩家昵称
@@ -55,10 +55,14 @@
         <div class="hud top">
           <div class="stat"><span>金币</span><strong id="coinText">0</strong></div>
           <div class="stat"><span>等级</span><strong id="levelText">1</strong></div>
-          <div class="stat"><span>水量</span><strong id="waterText">100</strong></div>
+          <div class="stat"><span>体力</span><strong id="energyText">100</strong></div>
+          <div class="stat"><span>日期</span><strong id="dateText">春1</strong></div>
           <div class="stat"><span>地图</span><strong id="roomText">公共</strong></div>
         </div>
         <div class="hud sync">
+          <button id="bagBtn" class="mini">背包</button>
+          <button id="questBtn" class="mini">任务</button>
+          <button id="sleepBtn" class="mini">睡觉</button>
           <button id="chatToggle" class="mini">公屏</button>
           <button id="syncNow" class="mini">同步</button>
           <span id="syncStatus">本地模式</span>
@@ -85,14 +89,21 @@
             <button id="plantBtn"><span>🌱</span>播种</button>
             <button id="waterBtn"><span>💧</span>浇水</button>
             <button id="harvestBtn"><span>🧺</span>收获</button>
-            <button id="shopBtn"><span>🔨</span>开垦</button>
+            <button id="shopBtn"><span>💬</span>交互</button>
           </div>
         </div>
+        <section id="rpgPanel" class="rpg-panel hidden">
+          <header>
+            <strong id="panelTitle">菜单</strong>
+            <button id="panelClose" aria-label="关闭">×</button>
+          </header>
+          <div id="panelBody" class="panel-body"></div>
+        </section>
         <div id="toast" class="toast hidden"></div>
       </section>
 
       <section id="rotateTip" class="rotate-tip" aria-hidden="true"></section>
     </main>
-    <script type="module" src="./src/game.js?v=11"></script>
+    <script type="module" src="./src/game.js?v=12"></script>
   </body>
 </html>
