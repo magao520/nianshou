@@ -1,19 +1,13 @@
-import * as THREE from "../assets/vendor/three.module.js";
-import { GLTFLoader } from "../assets/vendor/loaders/GLTFLoader.js";
-
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
-const dist2 = (a, b) => {
-  const dx = a.x - b.x;
-  const dz = a.z - b.z;
-  return Math.hypot(dx, dz);
-};
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
 
 const canvas = $("#gameCanvas");
+const ctx = canvas.getContext("2d", { alpha: false });
 const startScreen = $("#startScreen");
 const gameScreen = $("#gameScreen");
-const backendPanel = $("#backendPanel");
 const toastEl = $("#toast");
 const ui = {
   hp: $("#coinText"),
@@ -30,1107 +24,883 @@ const ui = {
   chatInput: $("#chatInput"),
 };
 
-const WORLD = 180;
-const SAVE_VERSION = 5;
-const clock = new THREE.Clock();
-let renderer;
-let scene;
-let camera;
-let player;
-let sun;
-let water;
-let started = false;
-let fallback2D = false;
-let ctx2d = null;
-let fallbackWorld = null;
-let loader = null;
-const modelLibrary = {};
-let yaw = 0;
-let attackCooldown = 0;
-let saveTimer = 0;
-let toastTimer = 0;
-let joystick = { x: 0, y: 0 };
+const WORLD = 2600;
+const SAVE_KEY = "primeArk2D_v2";
 const keys = new Set();
-const interactables = [];
-const dinos = [];
-const structures = [];
+const particles = [];
+const floaters = [];
 const logs = [];
-const MODEL_URLS = {
-  tree: "../assets/models/kenney/survival/tree.glb",
-  treeTall: "../assets/models/kenney/survival/tree-tall.glb",
-  palm: "../assets/models/kenney/nature/tree_palmBend.glb",
-  rockA: "../assets/models/kenney/survival/rock-a.glb",
-  rockC: "../assets/models/kenney/survival/rock-c.glb",
-  bush: "../assets/models/kenney/nature/plant_bushSmall.glb",
-  grassLarge: "../assets/models/kenney/survival/grass-large.glb",
-  patchGrass: "../assets/models/kenney/survival/patch-grass-large.glb",
-  campfire: "../assets/models/kenney/survival/campfire-pit.glb",
-  tent: "../assets/models/kenney/survival/tent.glb",
-  floor: "../assets/models/kenney/survival/structure-floor.glb",
-  chest: "../assets/models/kenney/survival/chest.glb",
-};
+const resources = [];
+const dinos = [];
+const buildings = [];
+const decals = [];
+const ripples = [];
+const images = {};
+let started = false;
+let last = performance.now();
+let time = 0;
+let weather = "clear";
+let weatherTimer = 25;
+let rainPower = 0;
+let toastTimer = 0;
+let attackTimer = 0;
+let gatherTimer = 0;
+let cameraShake = 0;
+let pointerAim = { x: 0, y: 0 };
+let joystick = { x: 0, y: 0 };
+let camera = { x: 0, y: 0, zoom: 1 };
+let graceTimer = 12;
 
-const state = {
-  name: "幸存者",
+const player = {
+  x: 0,
+  y: 0,
+  vx: 0,
+  vy: 0,
+  r: 18,
+  dir: 0,
   hp: 100,
   stamina: 100,
   hunger: 100,
   thirst: 100,
   level: 1,
   xp: 0,
-  dayTime: 0.28,
-  inventory: {
-    wood: 0,
-    stone: 0,
-    fiber: 0,
-    berries: 2,
-    meat: 0,
-    hide: 0,
-    spear: 1,
-  },
-  crafted: {
-    campfire: 0,
-    foundation: 0,
-  },
+  inv: { wood: 0, stone: 0, fiber: 0, berries: 3, meat: 0, hide: 0, spear: 1 },
+  quests: { gather: 0, build: 0, hunt: 0 },
 };
 
-const material = {
-  grass: new THREE.MeshLambertMaterial({ color: 0x426f32 }),
-  sand: new THREE.MeshLambertMaterial({ color: 0xb99a63 }),
-  rock: new THREE.MeshLambertMaterial({ color: 0x6b7178 }),
-  trunk: new THREE.MeshLambertMaterial({ color: 0x7a4a2a }),
-  leaf: new THREE.MeshLambertMaterial({ color: 0x2f7d3a }),
-  water: new THREE.MeshLambertMaterial({ color: 0x2589c7, transparent: true, opacity: 0.72 }),
-  player: new THREE.MeshStandardMaterial({ color: 0xd9b06e, roughness: 0.75 }),
-  playerCloth: new THREE.MeshStandardMaterial({ color: 0x315f48, roughness: 0.85 }),
-  raptor: new THREE.MeshStandardMaterial({ color: 0x7b6b4f, roughness: 0.95 }),
-  herb: new THREE.MeshStandardMaterial({ color: 0x4f8b5b, roughness: 0.95 }),
-  warning: new THREE.MeshBasicMaterial({ color: 0xff5f4a }),
+const recipes = {
+  spear: { name: "骨矛", cost: { wood: 2, stone: 1, fiber: 1 }, apply: () => player.inv.spear += 1 },
+  campfire: { name: "营火", cost: { wood: 4, stone: 2 }, apply: () => placeBuilding("campfire") },
+  palisade: { name: "木栅栏", cost: { wood: 3, fiber: 1 }, apply: () => placeBuilding("palisade") },
+  hut: { name: "棕榈棚屋", cost: { wood: 10, fiber: 6, hide: 1 }, apply: () => placeBuilding("hut") },
 };
 
-async function init() {
-  const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
-  if (!gl) {
-    initFallback2D();
-    return;
-  }
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.setClearColor(0x7ab6d6);
+const tasks = [
+  { id: "gather", name: "立足荒岛", text: "采集 12 份资源", goal: 12 },
+  { id: "build", name: "点亮营地", text: "建造 2 个建筑", goal: 2 },
+  { id: "hunt", name: "猎手证明", text: "击倒 2 只恐龙", goal: 2 },
+];
 
-  scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x8bb6cc, 55, 170);
-
-  camera = new THREE.PerspectiveCamera(58, 1, 0.1, 400);
-  scene.add(camera);
-
-  const hemi = new THREE.HemisphereLight(0xb9e7ff, 0x28351f, 1.15);
-  scene.add(hemi);
-  sun = new THREE.DirectionalLight(0xffe2a2, 1.45);
-  sun.position.set(38, 58, 18);
-  sun.castShadow = true;
-  sun.shadow.camera.left = -90;
-  sun.shadow.camera.right = 90;
-  sun.shadow.camera.top = 90;
-  sun.shadow.camera.bottom = -90;
-  sun.shadow.mapSize.set(1024, 1024);
-  scene.add(sun);
-
-  loader = new GLTFLoader();
-  await loadModelAssets();
-  buildIsland();
-  player = createPlayer();
-  player.position.set(0, 1.1, 10);
-  scene.add(player);
-  spawnWorld();
-  resizeCanvas();
-  log("你在陌生荒岛醒来。先采集木头、石头和浆果。");
-  log("靠近湖边可饮水，遇到迅猛龙请攻击或逃跑。");
+function loadImage(key, src) {
+  const img = new Image();
+  img.src = src;
+  images[key] = img;
 }
 
-async function loadModelAssets() {
-  const entries = Object.entries(MODEL_URLS);
-  await Promise.all(entries.map(async ([key, url]) => {
-    try {
-      const gltf = await loader.loadAsync(url);
-      modelLibrary[key] = gltf.scene;
-      gltf.scene.traverse((obj) => {
-        if (obj.isMesh) {
-          obj.castShadow = true;
-          obj.receiveShadow = true;
-        }
-      });
-    } catch (err) {
-      console.warn("模型加载失败，使用程序化降级：", key, err);
+[
+  ["flame", "./assets/2d/kenney/particles/flame_06.png"],
+  ["smoke", "./assets/2d/kenney/particles/smoke_07.png"],
+  ["spark", "./assets/2d/kenney/particles/spark_06.png"],
+  ["slash", "./assets/2d/kenney/particles/slash_01.png"],
+  ["light", "./assets/2d/kenney/particles/light_01.png"],
+  ["uiPanel", "./assets/2d/kenney/ui/panel_beige.png"],
+  ["uiButton", "./assets/2d/kenney/ui/buttonLong_beige.png"],
+].forEach(([k, v]) => loadImage(k, v));
+
+function initWorld() {
+  resources.length = 0;
+  dinos.length = 0;
+  buildings.length = 0;
+  decals.length = 0;
+  ripples.length = 0;
+
+  const rngPoints = (count, minR, maxR) => {
+    const pts = [];
+    for (let i = 0; i < count; i += 1) {
+      const a = rand(0, TAU);
+      const r = rand(minR, maxR);
+      pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
     }
-  }));
-}
-
-function cloneModel(key, scale = 1) {
-  const base = modelLibrary[key];
-  if (!base) return null;
-  const clone = base.clone(true);
-  clone.scale.setScalar(scale);
-  clone.traverse((obj) => {
-    if (obj.isMesh) {
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-    }
-  });
-  return clone;
-}
-
-function buildIsland() {
-  const groundGeo = new THREE.PlaneGeometry(WORLD, WORLD, 96, 96);
-  groundGeo.rotateX(-Math.PI / 2);
-  const pos = groundGeo.attributes.position;
-  for (let i = 0; i < pos.count; i += 1) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const edge = Math.max(Math.abs(x), Math.abs(z)) / (WORLD / 2);
-    const height = Math.sin(x * 0.16) * 0.45 + Math.cos(z * 0.14) * 0.35 - Math.max(0, edge - 0.76) * 8;
-    pos.setY(i, height);
-  }
-  groundGeo.computeVertexNormals();
-  const ground = new THREE.Mesh(groundGeo, material.grass);
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  const beach = new THREE.Mesh(
-    new THREE.RingGeometry(70, 90, 96),
-    material.sand,
-  );
-  beach.rotation.x = -Math.PI / 2;
-  beach.position.y = 0.04;
-  beach.receiveShadow = true;
-  scene.add(beach);
-
-  water = new THREE.Mesh(new THREE.CircleGeometry(16, 48), material.water);
-  water.rotation.x = -Math.PI / 2;
-  water.position.set(-25, 0.18, -18);
-  water.name = "淡水湖";
-  scene.add(water);
-
-  const lakeRing = new THREE.Mesh(new THREE.RingGeometry(16, 18, 48), material.sand);
-  lakeRing.rotation.x = -Math.PI / 2;
-  lakeRing.position.copy(water.position);
-  lakeRing.position.y = 0.16;
-  scene.add(lakeRing);
-}
-
-function spawnWorld() {
-  for (let i = 0; i < 42; i += 1) {
-    const p = randomLandPoint();
-    addTree(p.x, p.z);
-  }
-  for (let i = 0; i < 26; i += 1) {
-    const p = randomLandPoint();
-    addRock(p.x, p.z);
-  }
-  for (let i = 0; i < 24; i += 1) {
-    const p = randomLandPoint();
-    addBush(p.x, p.z);
-  }
-  for (let i = 0; i < 38; i += 1) {
-    const p = randomLandPoint();
-    addSceneryGrass(p.x, p.z);
-  }
-  addStarterCamp();
-  [
-    { x: 18, z: -30, kind: "herb" },
-    { x: -38, z: 32, kind: "herb" },
-    { x: 45, z: 20, kind: "raptor" },
-    { x: -52, z: -42, kind: "raptor" },
-  ].forEach((d) => addDino(d.x, d.z, d.kind));
-}
-
-function addStarterCamp() {
-  const tent = cloneModel("tent", 1.35);
-  if (tent) {
-    tent.position.set(6, 0.05, 5);
-    tent.rotation.y = -0.7;
-    scene.add(tent);
-    structures.push(tent);
-  }
-  const chest = cloneModel("chest", 1.1);
-  if (chest) {
-    chest.position.set(9, 0.05, 6.8);
-    chest.rotation.y = 0.5;
-    scene.add(chest);
-    structures.push(chest);
-  }
-  addCampfire(3, 7);
-}
-
-function initFallback2D() {
-  fallback2D = true;
-  ctx2d = canvas.getContext("2d");
-  player = { position: new THREE.Vector3(0, 1.1, 10), rotation: { y: 0 } };
-  fallbackWorld = {
-    nodes: [
-      ...Array.from({ length: 18 }, () => ({ type: "tree", x: rand(-70, 70), z: rand(-70, 70), hp: 3 })),
-      ...Array.from({ length: 12 }, () => ({ type: "rock", x: rand(-70, 70), z: rand(-70, 70), hp: 3 })),
-      ...Array.from({ length: 12 }, () => ({ type: "bush", x: rand(-70, 70), z: rand(-70, 70), hp: 1 })),
-    ],
-    dinos: [
-      { kind: "raptor", x: 45, z: 22, hp: 42, attack: 0 },
-      { kind: "raptor", x: -48, z: -38, hp: 42, attack: 0 },
-      { kind: "herb", x: 20, z: -32, hp: 62, attack: 0 },
-    ],
-    structures: [],
+    return pts;
   };
-  showToast("当前浏览器禁用了 WebGL，已进入 2D 降级生存模式。");
-  log("WebGL 不可用：已启用 Canvas 2D 降级模式，核心生存玩法仍可测试。");
+
+  rngPoints(90, 180, 1080).forEach((p, i) => {
+    resources.push({ id: `tree-${i}`, type: "tree", x: p.x, y: p.y, r: rand(24, 42), hp: 3, maxHp: 3, sway: rand(0, TAU) });
+  });
+  rngPoints(42, 220, 1040).forEach((p, i) => {
+    resources.push({ id: `rock-${i}`, type: "rock", x: p.x, y: p.y, r: rand(20, 34), hp: 3, maxHp: 3, rot: rand(0, TAU) });
+  });
+  rngPoints(46, 130, 940).forEach((p, i) => {
+    resources.push({ id: `bush-${i}`, type: "bush", x: p.x, y: p.y, r: rand(18, 28), hp: 1, maxHp: 1, sway: rand(0, TAU) });
+  });
+  rngPoints(180, 80, 1120).forEach((p) => decals.push({ type: Math.random() < 0.7 ? "grass" : "flower", x: p.x, y: p.y, s: rand(0.6, 1.4), a: rand(0, TAU) }));
+  [
+    { type: "raptor", x: 920, y: 560 },
+    { type: "raptor", x: -980, y: -620 },
+    { type: "raptor", x: 260, y: -980 },
+    { type: "trike", x: -380, y: 580 },
+    { type: "trike", x: 650, y: -520 },
+    { type: "stego", x: -780, y: 120 },
+  ].forEach(spawnDino);
+  buildings.push({ type: "campfire", x: 70, y: 70, hp: 100, built: true });
+  buildings.push({ type: "hut", x: -80, y: 65, hp: 140, built: true });
+}
+
+function spawnDino(d) {
+  const stats = {
+    raptor: { hp: 46, r: 24, speed: 82, damage: 7, aggro: 230, color: "#9c6c3d" },
+    trike: { hp: 90, r: 34, speed: 55, damage: 14, aggro: 95, color: "#66794a" },
+    stego: { hp: 115, r: 38, speed: 44, damage: 16, aggro: 80, color: "#546e62" },
+  }[d.type];
+  dinos.push({ ...d, ...stats, maxHp: stats.hp, vx: 0, vy: 0, dir: rand(0, TAU), state: "wander", target: randomLandPoint(), atk: 0, hurt: 0 });
 }
 
 function randomLandPoint() {
-  for (let i = 0; i < 50; i += 1) {
-    const x = rand(-75, 75);
-    const z = rand(-75, 75);
-    if (Math.hypot(x, z) < 78 && Math.hypot(x + 25, z + 18) > 22) return { x, z };
+  const a = rand(0, TAU);
+  const r = rand(180, 1020);
+  return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+}
+
+function resizeCanvas() {
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.floor(rect.width * dpr);
+  canvas.height = Math.floor(rect.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function startGame() {
+  startScreen.classList.remove("active");
+  gameScreen.classList.remove("hidden");
+  loadSave();
+  if (player.hp < 70) {
+    player.hp = 100;
+    player.hunger = Math.max(player.hunger, 90);
+    player.thirst = Math.max(player.thirst, 90);
   }
-  return { x: rand(-45, 45), z: rand(-45, 45) };
-}
-
-function createPlayer() {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 1.05, 4, 8), material.player);
-  body.position.y = 0.8;
-  body.castShadow = true;
-  const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.55, 0.38), material.playerCloth);
-  cloth.position.set(0, 0.75, -0.03);
-  cloth.castShadow = true;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 8), material.player);
-  head.position.y = 1.65;
-  head.castShadow = true;
-  const spear = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.8, 6), new THREE.MeshStandardMaterial({ color: 0x72512b }));
-  spear.rotation.z = Math.PI / 2.8;
-  spear.position.set(0.55, 1.05, -0.2);
-  spear.castShadow = true;
-  g.add(body, cloth, head, spear);
-  return g;
-}
-
-function addTree(x, z) {
-  const model = cloneModel(Math.random() < 0.25 ? "palm" : Math.random() < 0.55 ? "treeTall" : "tree", rand(1.25, 1.9));
-  if (model) {
-    model.position.set(x, 0, z);
-    model.rotation.y = rand(0, Math.PI * 2);
-    model.userData = { type: "tree", hp: 3, label: "树木", gives: { wood: 2, fiber: 1 } };
-    scene.add(model);
-    interactables.push(model);
-    return;
-  }
-  const g = new THREE.Group();
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 3.2, 7), material.trunk);
-  trunk.position.y = 1.6;
-  trunk.castShadow = true;
-  const crown = new THREE.Mesh(new THREE.ConeGeometry(1.55, 4.1, 8), material.leaf);
-  crown.position.y = 4;
-  crown.castShadow = true;
-  g.add(trunk, crown);
-  g.position.set(x, 0, z);
-  g.userData = { type: "tree", hp: 3, label: "树木", gives: { wood: 2, fiber: 1 } };
-  scene.add(g);
-  interactables.push(g);
-}
-
-function addRock(x, z) {
-  const model = cloneModel(Math.random() < 0.5 ? "rockA" : "rockC", rand(1.2, 2.0));
-  if (model) {
-    model.position.set(x, 0.02, z);
-    model.rotation.y = rand(0, Math.PI * 2);
-    model.userData = { type: "rock", hp: 3, label: "岩石", gives: { stone: 2 } };
-    scene.add(model);
-    interactables.push(model);
-    return;
-  }
-  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rand(0.7, 1.25), 0), material.rock);
-  rock.scale.y = rand(0.55, 1.15);
-  rock.position.set(x, 0.7, z);
-  rock.castShadow = true;
-  rock.receiveShadow = true;
-  rock.userData = { type: "rock", hp: 3, label: "岩石", gives: { stone: 2 } };
-  scene.add(rock);
-  interactables.push(rock);
-}
-
-function addBush(x, z) {
-  const model = cloneModel("bush", rand(1.3, 2.0));
-  if (model) {
-    model.position.set(x, 0, z);
-    model.rotation.y = rand(0, Math.PI * 2);
-    model.userData = { type: "bush", hp: 1, label: "浆果丛", gives: { berries: 2, fiber: 1 } };
-    scene.add(model);
-    interactables.push(model);
-    return;
-  }
-  const bush = new THREE.Mesh(new THREE.SphereGeometry(0.75, 10, 8), new THREE.MeshLambertMaterial({ color: 0x3f9b42 }));
-  bush.scale.y = 0.55;
-  bush.position.set(x, 0.45, z);
-  bush.castShadow = true;
-  bush.userData = { type: "bush", hp: 1, label: "浆果丛", gives: { berries: 2, fiber: 1 } };
-  scene.add(bush);
-  interactables.push(bush);
-}
-
-function addSceneryGrass(x, z) {
-  const model = cloneModel(Math.random() < 0.45 ? "patchGrass" : "grassLarge", rand(0.9, 1.6));
-  if (!model) return;
-  model.position.set(x, 0.03, z);
-  model.rotation.y = rand(0, Math.PI * 2);
-  scene.add(model);
-}
-
-function addDino(x, z, kind) {
-  const g = new THREE.Group();
-  const mat = kind === "raptor" ? material.raptor : material.herb;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(kind === "raptor" ? 1.6 : 2.5, 1.05, 0.85), mat);
-  body.position.y = 1.05;
-  body.castShadow = true;
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 1.0, 6), mat);
-  neck.position.set(0.72, 1.55, 0);
-  neck.rotation.z = -0.65;
-  neck.castShadow = true;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.48, 0.52), mat);
-  head.position.set(1.25, 1.85, 0);
-  head.castShadow = true;
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.8, 6), mat);
-  tail.position.set(-1.1, 1.1, 0);
-  tail.rotation.z = Math.PI / 2;
-  tail.castShadow = true;
-  for (const lx of [-0.55, 0.55]) {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, 0.9, 6), mat);
-    leg.position.set(lx, 0.45, 0.28);
-    leg.castShadow = true;
-    const leg2 = leg.clone();
-    leg2.position.z = -0.28;
-    g.add(leg, leg2);
-  }
-  g.add(body, neck, head, tail);
-  g.position.set(x, 0, z);
-  g.userData = {
-    type: "dino",
-    kind,
-    hp: kind === "raptor" ? 42 : 62,
-    maxHp: kind === "raptor" ? 42 : 62,
-    speed: kind === "raptor" ? 8.5 : 3.2,
-    state: "wander",
-    target: randomLandPoint(),
-    attackTimer: 0,
-  };
-  scene.add(g);
-  dinos.push(g);
+  graceTimer = 12;
+  started = true;
+  resizeCanvas();
+  showToast("2D 极致版：活下去，建营地，猎恐龙。");
+  log("你醒在原始岛中央。采集、饮水、制作，天黑前点起火。");
 }
 
 function update(dt) {
-  if (!started) return;
-  if (fallback2D) {
-    updateFallback2D(dt);
-    return;
+  time += dt;
+  weatherTimer -= dt;
+  if (weatherTimer <= 0) {
+    weather = Math.random() < 0.45 ? "rain" : Math.random() < 0.2 ? "fog" : "clear";
+    weatherTimer = rand(28, 55);
+    log(weather === "rain" ? "热带雨云压过来了。" : weather === "fog" ? "雾气从林间漫起。" : "天空放晴了。");
   }
-  attackCooldown = Math.max(0, attackCooldown - dt);
-  saveTimer += dt;
-  updateSurvival(dt);
+  rainPower = lerp(rainPower, weather === "rain" ? 1 : 0, 1 - Math.pow(0.02, dt));
+  attackTimer = Math.max(0, attackTimer - dt);
+  gatherTimer = Math.max(0, gatherTimer - dt);
+  graceTimer = Math.max(0, graceTimer - dt);
+  cameraShake = Math.max(0, cameraShake - dt * 18);
+
   updatePlayer(dt);
   updateDinos(dt);
-  updateDayNight(dt);
+  updateParticles(dt);
+  updateNeeds(dt);
   updateCamera(dt);
   updateHud();
-  if (saveTimer > 6) {
-    saveTimer = 0;
-    saveLocal();
-  }
-}
-
-function updateSurvival(dt) {
-  state.hunger = clamp(state.hunger - dt * 0.45, 0, 100);
-  state.thirst = clamp(state.thirst - dt * 0.7, 0, 100);
-  if (state.hunger <= 0 || state.thirst <= 0) state.hp = clamp(state.hp - dt * 4, 0, 100);
-  if (state.hunger > 35 && state.thirst > 35 && state.hp < 100) state.hp = clamp(state.hp + dt * 1.1, 0, 100);
-  if (state.hp <= 0) respawn();
 }
 
 function updatePlayer(dt) {
-  const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-  const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-  const keyX = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
-  const keyY = (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) - (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
-  const mx = joystick.x || keyX;
-  const my = -joystick.y || keyY;
-  const move = new THREE.Vector3();
-  move.addScaledVector(right, mx);
-  move.addScaledVector(forward, my);
-  const len = move.length();
-  const sprinting = keys.has("ShiftLeft") && state.stamina > 3 && len > 0.1;
+  const kx = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
+  const ky = (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0) - (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0);
+  let mx = joystick.x || kx;
+  let my = joystick.y || ky;
+  const len = Math.hypot(mx, my);
+  const sprint = keys.has("ShiftLeft") && player.stamina > 4 && len > 0.1;
   if (len > 0.1) {
-    move.normalize();
-    const speed = sprinting ? 13 : 8;
-    if (sprinting) state.stamina = clamp(state.stamina - dt * 14, 0, 100);
-    player.position.addScaledVector(move, speed * dt);
-    player.rotation.y = Math.atan2(move.x, move.z);
+    mx /= len; my /= len;
+    const speed = sprint ? 210 : 135;
+    player.x += mx * speed * dt;
+    player.y += my * speed * dt;
+    player.dir = Math.atan2(my, mx);
+    player.stamina = clamp(player.stamina - (sprint ? 18 : 4) * dt, 0, 100);
+    if (Math.random() < 10 * dt) dust(player.x - mx * 10, player.y - my * 10, 1);
   } else {
-    state.stamina = clamp(state.stamina + dt * 8, 0, 100);
+    player.stamina = clamp(player.stamina + 13 * dt, 0, 100);
   }
-  const r = Math.hypot(player.position.x, player.position.z);
-  if (r > 84) {
-    player.position.x *= 84 / r;
-    player.position.z *= 84 / r;
+  const islandR = WORLD * 0.46;
+  const d = Math.hypot(player.x, player.y);
+  if (d > islandR) {
+    player.x *= islandR / d;
+    player.y *= islandR / d;
+    showToast("海浪太急，别离岛太远。");
   }
-  player.position.y = 1.1;
 }
 
 function updateDinos(dt) {
-  const p = player.position;
-  dinos.slice().forEach((d) => {
-    const data = d.userData;
-    data.attackTimer = Math.max(0, data.attackTimer - dt);
-    const dToPlayer = dist2(d.position, p);
-    let target = data.target;
-    let speed = data.speed;
-    if (d.kind === "raptor" && dToPlayer < 24) {
-      target = p;
-      speed *= dToPlayer < 7 ? 1.05 : 1;
-      if (dToPlayer < 2.4 && data.attackTimer <= 0) {
-        data.attackTimer = 1.15;
-        state.hp = clamp(state.hp - 11, 0, 100);
-        log("迅猛龙咬伤了你，快攻击或逃离！");
-        flashDamage();
-      }
-    } else if (dToPlayer < 8 && data.kind === "herb") {
-      target = new THREE.Vector3(d.position.x - (p.x - d.position.x), 0, d.position.z - (p.z - d.position.z));
-      speed *= 1.35;
-    } else if (dist2(d.position, data.target) < 3) {
-      data.target = randomLandPoint();
-      target = data.target;
+  dinos.forEach((d) => {
+    d.atk = Math.max(0, d.atk - dt);
+    d.hurt = Math.max(0, d.hurt - dt);
+    const pd = Math.hypot(player.x - d.x, player.y - d.y);
+    let tx = d.target.x;
+    let ty = d.target.y;
+    let speed = d.speed;
+    if (d.type === "raptor" && pd < d.aggro && graceTimer <= 0) {
+      d.state = "hunt";
+      tx = player.x; ty = player.y; speed *= 1.18;
+    } else if (d.type !== "raptor" && pd < d.aggro) {
+      d.state = "flee";
+      tx = d.x - (player.x - d.x); ty = d.y - (player.y - d.y); speed *= 1.35;
+    } else if (Math.hypot(d.target.x - d.x, d.target.y - d.y) < 30) {
+      d.target = randomLandPoint();
+      d.state = "wander";
     }
-    const dir = new THREE.Vector3(target.x - d.position.x, 0, target.z - d.position.z);
-    if (dir.length() > 0.1) {
-      dir.normalize();
-      d.position.addScaledVector(dir, speed * dt);
-      d.rotation.y = Math.atan2(dir.x, dir.z) - Math.PI / 2;
+    const a = Math.atan2(ty - d.y, tx - d.x);
+    d.dir = lerpAngle(d.dir, a, 1 - Math.pow(0.03, dt));
+    d.x += Math.cos(d.dir) * speed * dt;
+    d.y += Math.sin(d.dir) * speed * dt;
+    const edge = Math.hypot(d.x, d.y);
+    if (edge > WORLD * 0.45) {
+      d.x *= (WORLD * 0.45) / edge;
+      d.y *= (WORLD * 0.45) / edge;
+      d.target = randomLandPoint();
+    }
+    if (pd < d.r + player.r + 4 && d.atk <= 0 && graceTimer <= 0) {
+      d.atk = d.type === "raptor" ? 0.9 : 1.5;
+      player.hp = clamp(player.hp - d.damage, 0, 100);
+      cameraShake = 8;
+      blood(player.x, player.y, 8);
+      log(`${dinoName(d.type)}伤到了你。`);
     }
   });
 }
 
-function updateDayNight(dt) {
-  state.dayTime = (state.dayTime + dt * 0.012) % 1;
-  const angle = state.dayTime * Math.PI * 2;
-  sun.position.set(Math.cos(angle) * 55, Math.max(8, Math.sin(angle) * 70), 28);
-  const daylight = clamp(Math.sin(angle) * 0.75 + 0.35, 0.18, 1.35);
-  sun.intensity = daylight;
-  renderer.setClearColor(new THREE.Color().setHSL(0.57, 0.45, daylight > 0.35 ? 0.62 : 0.16));
-  scene.fog.color = renderer.getClearColor(new THREE.Color());
+function lerpAngle(a, b, t) {
+  let d = ((b - a + Math.PI) % TAU) - Math.PI;
+  return a + d * t;
+}
+
+function updateNeeds(dt) {
+  player.hunger = clamp(player.hunger - dt * 0.55, 0, 100);
+  player.thirst = clamp(player.thirst - dt * (weather === "rain" ? 0.28 : 0.82), 0, 100);
+  if (player.hunger <= 0 || player.thirst <= 0) player.hp = clamp(player.hp - dt * 3.2, 0, 100);
+  if (player.hp <= 0) {
+    player.hp = 100; player.stamina = 100; player.hunger = 70; player.thirst = 70; player.x = 0; player.y = 0;
+    log("你昏迷后被潮水冲回营地，丢失了一些材料。");
+    player.inv.wood = Math.floor(player.inv.wood * 0.7);
+    player.inv.stone = Math.floor(player.inv.stone * 0.7);
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i -= 1) {
+    const p = particles[i];
+    p.life -= dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= Math.pow(0.02, dt);
+    p.vy *= Math.pow(0.02, dt);
+    p.size += (p.grow || 0) * dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+  for (let i = floaters.length - 1; i >= 0; i -= 1) {
+    const f = floaters[i];
+    f.life -= dt; f.y -= 30 * dt;
+    if (f.life <= 0) floaters.splice(i, 1);
+  }
+  buildings.filter((b) => b.type === "campfire").forEach((b) => {
+    if (Math.random() < 16 * dt) {
+      particles.push({ img: "flame", x: b.x + rand(-8, 8), y: b.y + rand(-8, 6), vx: rand(-6, 6), vy: rand(-30, -12), life: rand(0.4, 0.9), max: 0.9, size: rand(18, 36), grow: 8, color: "#ff9b38" });
+      particles.push({ img: "smoke", x: b.x + rand(-6, 6), y: b.y - 12, vx: rand(-12, 12), vy: rand(-28, -10), life: rand(0.8, 1.8), max: 1.8, size: rand(18, 38), grow: 16, color: "#6d6a62" });
+    }
+  });
+  if (rainPower > 0.05) {
+    for (let i = 0; i < 60 * rainPower * dt; i += 1) {
+      particles.push({ type: "rain", x: camera.x + rand(-canvas.clientWidth * 0.7, canvas.clientWidth * 0.7), y: camera.y + rand(-canvas.clientHeight * 0.7, canvas.clientHeight * 0.7), vx: -230, vy: 640, life: 0.45, max: 0.45, size: 1 });
+    }
+  }
 }
 
 function updateCamera(dt) {
-  const desired = new THREE.Vector3(
-    player.position.x - Math.sin(yaw) * 11,
-    player.position.y + 6.2,
-    player.position.z - Math.cos(yaw) * 11,
-  );
-  camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
-  camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z);
-}
-
-function updateFallback2D(dt) {
-  attackCooldown = Math.max(0, attackCooldown - dt);
-  saveTimer += dt;
-  updateSurvival(dt);
-  const keyX = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
-  const keyY = (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0) - (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0);
-  const vx = joystick.x || keyX;
-  const vz = joystick.y || keyY;
-  const len = Math.hypot(vx, vz);
-  if (len > 0.1) {
-    player.position.x += (vx / len) * 28 * dt;
-    player.position.z += (vz / len) * 28 * dt;
-    const r = Math.hypot(player.position.x, player.position.z);
-    if (r > 82) {
-      player.position.x *= 82 / r;
-      player.position.z *= 82 / r;
-    }
-  }
-  fallbackWorld.dinos.forEach((d) => {
-    d.attack = Math.max(0, d.attack - dt);
-    const dx = player.position.x - d.x;
-    const dz = player.position.z - d.z;
-    const dd = Math.hypot(dx, dz);
-    const speed = d.kind === "raptor" && dd < 20 ? 6.5 : d.kind === "herb" ? 4 : 3.2;
-    if (dd > 0.1) {
-      const sign = d.kind === "herb" && dd < 9 ? -1 : 1;
-      d.x += (dx / dd) * speed * dt * sign;
-      d.z += (dz / dd) * speed * dt * sign;
-    }
-    if (d.kind === "raptor" && dd < 2.4 && d.attack <= 0) {
-      d.attack = 1.2;
-      state.hp = clamp(state.hp - 6, 0, 100);
-      flashDamage();
-      log("迅猛龙扑咬了你。");
-    }
-  });
-  state.dayTime = (state.dayTime + dt * 0.012) % 1;
-  updateHud();
-  if (saveTimer > 6) {
-    saveTimer = 0;
-    saveLocal();
-  }
-}
-
-function renderFallback2D() {
-  if (!ctx2d || !fallbackWorld) return;
-  const rect = canvas.getBoundingClientRect();
-  const w = Math.floor(rect.width || window.innerWidth);
-  const h = Math.floor(rect.height || window.innerHeight);
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-  const cx = w / 2;
-  const cy = h / 2;
-  const scale = Math.min(w, h) / 190;
-  ctx2d.fillStyle = "#78a95a";
-  ctx2d.fillRect(0, 0, w, h);
-  ctx2d.save();
-  ctx2d.translate(cx - player.position.x * scale, cy - player.position.z * scale);
-  ctx2d.scale(scale, scale);
-  ctx2d.fillStyle = "#c7ad75";
-  ctx2d.beginPath();
-  ctx2d.arc(0, 0, 88, 0, Math.PI * 2);
-  ctx2d.fill();
-  ctx2d.fillStyle = "#4f8b3f";
-  ctx2d.beginPath();
-  ctx2d.arc(0, 0, 80, 0, Math.PI * 2);
-  ctx2d.fill();
-  ctx2d.fillStyle = "#287fc0";
-  ctx2d.beginPath();
-  ctx2d.arc(-25, -18, 16, 0, Math.PI * 2);
-  ctx2d.fill();
-  fallbackWorld.nodes.forEach((n) => {
-    ctx2d.fillStyle = n.type === "tree" ? "#1d6b35" : n.type === "rock" ? "#72777f" : "#3fa34d";
-    ctx2d.beginPath();
-    ctx2d.arc(n.x, n.z, n.type === "tree" ? 2.8 : 2.1, 0, Math.PI * 2);
-    ctx2d.fill();
-  });
-  fallbackWorld.structures.forEach((s) => {
-    ctx2d.fillStyle = s.type === "campfire" ? "#ff8a2a" : "#8a5a2f";
-    ctx2d.fillRect(s.x - 2, s.z - 2, 4, 4);
-  });
-  fallbackWorld.dinos.forEach((d) => {
-    ctx2d.fillStyle = d.kind === "raptor" ? "#8b6c4a" : "#4f8b5b";
-    ctx2d.fillRect(d.x - 3, d.z - 2, 6, 4);
-    ctx2d.fillStyle = "#1a1510";
-    ctx2d.fillRect(d.x - 3, d.z - 4, 6 * clamp(d.hp / (d.kind === "raptor" ? 42 : 62), 0, 1), 1);
-  });
-  ctx2d.fillStyle = "#f0c38a";
-  ctx2d.beginPath();
-  ctx2d.arc(player.position.x, player.position.z, 2.6, 0, Math.PI * 2);
-  ctx2d.fill();
-  ctx2d.restore();
-  ctx2d.fillStyle = "rgba(0,0,0,.48)";
-  ctx2d.fillRect(12, h - 34, w - 24, 22);
-  ctx2d.fillStyle = "#fff3d4";
-  ctx2d.font = "12px sans-serif";
-  ctx2d.fillText("2D 降级模式：WASD/摇杆移动，采集/饮水/攻击/建造仍可用", 22, h - 19);
-}
-
-function nearestFallbackNode(range) {
-  return fallbackWorld.nodes
-    .filter((n) => Math.hypot(n.x - player.position.x, n.z - player.position.z) <= range)
-    .sort((a, b) => Math.hypot(a.x - player.position.x, a.z - player.position.z) - Math.hypot(b.x - player.position.x, b.z - player.position.z))[0];
-}
-
-function nearestFallbackDino(range) {
-  return fallbackWorld.dinos
-    .filter((d) => Math.hypot(d.x - player.position.x, d.z - player.position.z) <= range)
-    .sort((a, b) => Math.hypot(a.x - player.position.x, a.z - player.position.z) - Math.hypot(b.x - player.position.x, b.z - player.position.z))[0];
-}
-
-function gatherFallback2D() {
-  const n = nearestFallbackNode(5);
-  if (!n) return showToast("靠近树、岩石或浆果丛再采集");
-  if (state.stamina < 8) return showToast("体力不足");
-  state.stamina -= 8;
-  n.hp -= 1;
-  const gives = n.type === "tree" ? { wood: 2, fiber: 1 } : n.type === "rock" ? { stone: 2 } : { berries: 2, fiber: 1 };
-  Object.entries(gives).forEach(([k, v]) => { state.inventory[k] += v; });
-  showToast(`采集获得：${Object.keys(gives).join("、")}`);
-  if (n.hp <= 0) fallbackWorld.nodes.splice(fallbackWorld.nodes.indexOf(n), 1);
-}
-
-function drinkFallback2D() {
-  if (Math.hypot(player.position.x + 25, player.position.z + 18) < 18) {
-    state.thirst = 100;
-    showToast("喝下淡水，口渴恢复。");
-  } else if (state.inventory.berries > 0) {
-    state.inventory.berries -= 1;
-    state.hunger = clamp(state.hunger + 18, 0, 100);
-    state.thirst = clamp(state.thirst + 8, 0, 100);
-    showToast("吃下浆果。");
-  } else showToast("没有浆果，去湖边饮水。");
-}
-
-function attackFallback2D() {
-  if (attackCooldown > 0) return;
-  const d = nearestFallbackDino(6);
-  if (!d) return showToast("附近没有目标");
-  attackCooldown = 0.55;
-  d.hp -= state.inventory.spear > 0 ? 20 : 8;
-  if (d.hp <= 0) {
-    fallbackWorld.dinos.splice(fallbackWorld.dinos.indexOf(d), 1);
-    state.inventory.meat += d.kind === "raptor" ? 3 : 5;
-    state.inventory.hide += d.kind === "raptor" ? 2 : 3;
-    showToast("猎物倒下，获得肉和兽皮。");
-  }
-}
-
-function buildFallback2D() {
-  if (state.inventory.wood >= 4 && state.inventory.stone >= 2) {
-    state.inventory.wood -= 4;
-    state.inventory.stone -= 2;
-    fallbackWorld.structures.push({ type: "campfire", x: player.position.x + 4, z: player.position.z });
-    showToast("建造营火。");
-  } else if (state.inventory.wood >= 3 && state.inventory.fiber >= 2) {
-    state.inventory.wood -= 3;
-    state.inventory.fiber -= 2;
-    fallbackWorld.structures.push({ type: "foundation", x: player.position.x + 4, z: player.position.z });
-    showToast("铺设地基。");
-  } else showToast("建造需要更多木材、石头或纤维。");
+  camera.x = lerp(camera.x, player.x, 1 - Math.pow(0.001, dt));
+  camera.y = lerp(camera.y, player.y, 1 - Math.pow(0.001, dt));
+  camera.zoom = lerp(camera.zoom, keys.has("ShiftLeft") ? 0.92 : 1, 1 - Math.pow(0.01, dt));
 }
 
 function gather() {
-  if (fallback2D) return gatherFallback2D();
-  const target = nearestInteractable(4.2);
-  if (!target) return showToast("靠近树、岩石或浆果丛再采集");
-  if (state.stamina < 8) return showToast("体力不足，等一会儿恢复");
-  state.stamina = clamp(state.stamina - 8, 0, 100);
-  target.userData.hp -= 1;
-  Object.entries(target.userData.gives || {}).forEach(([k, v]) => {
-    state.inventory[k] = (state.inventory[k] || 0) + v;
-  });
-  gainXp(4);
-  log(`采集 ${target.userData.label}，获得资源。`);
-  showToast(`获得：${Object.keys(target.userData.gives || {}).join("、")}`);
-  if (target.userData.hp <= 0) {
-    scene.remove(target);
-    const i = interactables.indexOf(target);
-    if (i >= 0) interactables.splice(i, 1);
+  if (gatherTimer > 0) return;
+  const target = nearest(resources, 70);
+  if (!target) return showToast("靠近树、岩石或浆果丛再采集。");
+  if (player.stamina < 8) return showToast("体力不足。");
+  gatherTimer = 0.35;
+  player.stamina -= 8;
+  target.hp -= 1;
+  slash(target.x, target.y, "#f7d28b");
+  cameraShake = 3;
+  const gain = target.type === "tree" ? { wood: 2, fiber: 1 } : target.type === "rock" ? { stone: 2 } : { berries: 2, fiber: 1 };
+  Object.entries(gain).forEach(([k, v]) => player.inv[k] += v);
+  player.quests.gather += Object.values(gain).reduce((a, b) => a + b, 0);
+  floatText(target.x, target.y - 28, `+${Object.keys(gain).map(itemName).join(" +")}`, "#fff0a8");
+  if (target.hp <= 0) {
+    resources.splice(resources.indexOf(target), 1);
+    burst(target.x, target.y, target.type === "rock" ? "#9aa2a8" : "#4e8d3f", 18);
   }
-  saveLocal();
+  gainXp(4);
 }
 
 function drinkOrEat() {
-  if (fallback2D) return drinkFallback2D();
-  const lakeDistance = Math.hypot(player.position.x + 25, player.position.z + 18);
-  if (lakeDistance < 18) {
-    state.thirst = 100;
-    showToast("喝下淡水，口渴恢复。");
-    log("你在湖边补满了水分。");
+  if (Math.hypot(player.x + 330, player.y + 150) < 180 || weather === "rain") {
+    player.thirst = 100;
+    showToast(weather === "rain" ? "雨水让你补充了水分。" : "喝下湖水，口渴恢复。");
+    ripple(player.x, player.y);
     return;
   }
-  if (state.inventory.berries > 0) {
-    state.inventory.berries -= 1;
-    state.hunger = clamp(state.hunger + 18, 0, 100);
-    state.thirst = clamp(state.thirst + 8, 0, 100);
-    showToast("吃下浆果，恢复少量饥饿和口渴。");
-    saveLocal();
-  } else {
-    showToast("没有浆果；靠近湖边可以饮水。");
-  }
+  if (player.inv.berries > 0) {
+    player.inv.berries -= 1;
+    player.hunger = clamp(player.hunger + 20, 0, 100);
+    player.thirst = clamp(player.thirst + 8, 0, 100);
+    showToast("吃下浆果，恢复饥饿。");
+  } else showToast("没有浆果，去湖边或等下雨补水。");
 }
 
 function attack() {
-  if (fallback2D) return attackFallback2D();
-  if (attackCooldown > 0) return;
-  if (state.stamina < 10) return showToast("体力不足，无法攻击");
-  attackCooldown = 0.55;
-  state.stamina = clamp(state.stamina - 10, 0, 100);
-  const target = nearestDino(4.2);
+  if (attackTimer > 0) return;
+  if (player.stamina < 12) return showToast("体力不足，无法攻击。");
+  attackTimer = 0.42;
+  player.stamina -= 12;
+  const range = player.inv.spear > 0 ? 78 : 48;
+  const target = nearest(dinos, range);
+  const sx = player.x + Math.cos(player.dir) * 36;
+  const sy = player.y + Math.sin(player.dir) * 36;
+  slash(sx, sy, "#d8f6ff");
   if (!target) {
-    showToast("附近没有目标");
+    showToast("挥空了。");
     return;
   }
-  const damage = state.inventory.spear > 0 ? 20 : 8;
-  target.userData.hp -= damage;
-  log(`你攻击了${target.userData.kind === "raptor" ? "迅猛龙" : "三角兽"}，造成 ${damage} 伤害。`);
-  if (target.userData.hp <= 0) {
-    scene.remove(target);
+  const dmg = player.inv.spear > 0 ? 24 : 9;
+  target.hp -= dmg;
+  target.hurt = 0.18;
+  cameraShake = 5;
+  blood(target.x, target.y, 10);
+  floatText(target.x, target.y - 30, `-${dmg}`, "#ffb0a2");
+  if (target.hp <= 0) {
     dinos.splice(dinos.indexOf(target), 1);
-    state.inventory.meat += target.userData.kind === "raptor" ? 3 : 5;
-    state.inventory.hide += target.userData.kind === "raptor" ? 2 : 3;
-    gainXp(target.userData.kind === "raptor" ? 35 : 22);
-    showToast("猎物倒下，获得肉和兽皮。");
+    player.inv.meat += target.type === "raptor" ? 3 : 5;
+    player.inv.hide += target.type === "raptor" ? 2 : 3;
+    player.quests.hunt += 1;
+    gainXp(target.type === "raptor" ? 40 : 28);
+    burst(target.x, target.y, "#9b3329", 26);
+    log(`击倒${dinoName(target.type)}，获得肉和兽皮。`);
   }
-  saveLocal();
-}
-
-function build() {
-  if (fallback2D) return buildFallback2D();
-  if (state.inventory.wood >= 4 && state.inventory.stone >= 2) {
-    state.inventory.wood -= 4;
-    state.inventory.stone -= 2;
-    state.crafted.campfire += 1;
-    addCampfire(player.position.x + Math.sin(yaw) * 3, player.position.z + Math.cos(yaw) * 3);
-    showToast("建造营火：夜晚更安全。");
-    log("你搭起了一座营火。");
-    saveLocal();
-    return;
-  }
-  if (state.inventory.wood >= 3 && state.inventory.fiber >= 2) {
-    state.inventory.wood -= 3;
-    state.inventory.fiber -= 2;
-    state.crafted.foundation += 1;
-    addFoundation(player.position.x + Math.sin(yaw) * 3, player.position.z + Math.cos(yaw) * 3);
-    showToast("铺设木质地基。");
-    saveLocal();
-    return;
-  }
-  showToast("建造需要：营火 4木+2石，地基 3木+2纤维");
-}
-
-function addCampfire(x, z) {
-  const model = cloneModel("campfire", 1.6);
-  if (model) {
-    const light = new THREE.PointLight(0xff8a2a, 1.8, 16);
-    light.position.y = 1.3;
-    model.add(light);
-    model.position.set(x, 0.04, z);
-    scene.add(model);
-    structures.push(model);
-    return;
-  }
-  const g = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.25, 8), material.rock);
-  base.position.y = 0.18;
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1, 8), new THREE.MeshBasicMaterial({ color: 0xff8a2a }));
-  flame.position.y = 0.78;
-  const light = new THREE.PointLight(0xff8a2a, 1.8, 16);
-  light.position.y = 1.3;
-  g.add(base, flame, light);
-  g.position.set(x, 0, z);
-  scene.add(g);
-  structures.push(g);
-}
-
-function addFoundation(x, z) {
-  const model = cloneModel("floor", 1.55);
-  if (model) {
-    model.position.set(x, 0.05, z);
-    model.rotation.y = Math.round(yaw / (Math.PI / 2)) * (Math.PI / 2);
-    scene.add(model);
-    structures.push(model);
-    return;
-  }
-  const f = new THREE.Mesh(new THREE.BoxGeometry(4, 0.35, 4), new THREE.MeshLambertMaterial({ color: 0x8a5a2f }));
-  f.position.set(x, 0.22, z);
-  f.receiveShadow = true;
-  f.castShadow = true;
-  scene.add(f);
-  structures.push(f);
-}
-
-function nearestInteractable(range) {
-  return interactables
-    .filter((o) => dist2(o.position, player.position) <= range)
-    .sort((a, b) => dist2(a.position, player.position) - dist2(b.position, player.position))[0];
-}
-
-function nearestDino(range) {
-  return dinos
-    .filter((o) => dist2(o.position, player.position) <= range)
-    .sort((a, b) => dist2(a.position, player.position) - dist2(b.position, player.position))[0];
-}
-
-function gainXp(amount) {
-  state.xp += amount;
-  const next = state.level * 80;
-  if (state.xp >= next) {
-    state.xp -= next;
-    state.level += 1;
-    state.hp = 100;
-    state.stamina = 100;
-    showToast(`升级到 ${state.level} 级`);
-  }
-}
-
-function respawn() {
-  state.hp = 100;
-  state.stamina = 100;
-  state.hunger = 70;
-  state.thirst = 70;
-  player.position.set(0, 1.1, 10);
-  log("你昏迷后在海滩醒来，丢失了一些肉和兽皮。");
-  state.inventory.meat = Math.max(0, state.inventory.meat - 2);
-  state.inventory.hide = Math.max(0, state.inventory.hide - 1);
-}
-
-function flashDamage() {
-  gameScreen.classList.add("damage");
-  setTimeout(() => gameScreen.classList.remove("damage"), 180);
-}
-
-function openBag() {
-  const rows = Object.entries(state.inventory)
-    .map(([k, v]) => `<div class="bag-row"><span>${itemName(k)}</span><strong>×${v}</strong></div>`)
-    .join("");
-  openPanel("背包", `<div class="bag-list">${rows}</div><p class="panel-note">采集：靠近树/石/浆果丛点“采集”。饮水：靠近湖泊点“饮水”。</p>`);
-}
-
-function openCraft() {
-  openPanel("制作", `
-    <div class="quest-row"><strong>石矛</strong><p>已有：${state.inventory.spear}</p><button class="panel-action" data-craft="spear">2木 + 1石 + 1纤维</button></div>
-    <div class="quest-row"><strong>营火</strong><p>已有：${state.crafted.campfire}</p><button class="panel-action" data-craft="campfire">4木 + 2石</button></div>
-    <div class="quest-row"><strong>木质地基</strong><p>已有：${state.crafted.foundation}</p><button class="panel-action" data-craft="foundation">3木 + 2纤维</button></div>
-  `);
 }
 
 function craft(kind) {
-  const need = {
-    spear: { wood: 2, stone: 1, fiber: 1 },
-    campfire: { wood: 4, stone: 2 },
-    foundation: { wood: 3, fiber: 2 },
-  }[kind];
-  if (!need) return;
-  if (!Object.entries(need).every(([k, v]) => (state.inventory[k] || 0) >= v)) {
-    showToast("材料不足");
-    return;
-  }
-  Object.entries(need).forEach(([k, v]) => { state.inventory[k] -= v; });
-  if (kind === "spear") state.inventory.spear += 1;
-  if (kind === "campfire") {
-    state.crafted.campfire += 1;
-    addCampfire(player.position.x + 3, player.position.z);
-  }
-  if (kind === "foundation") {
-    state.crafted.foundation += 1;
-    addFoundation(player.position.x + 3, player.position.z);
-  }
-  showToast("制作完成");
+  const r = recipes[kind];
+  if (!r) return;
+  if (!Object.entries(r.cost).every(([k, v]) => player.inv[k] >= v)) return showToast("材料不够。");
+  Object.entries(r.cost).forEach(([k, v]) => player.inv[k] -= v);
+  r.apply();
+  player.quests.build += kind === "spear" ? 0 : 1;
+  showToast(`${r.name} 完成。`);
   openCraft();
-  saveLocal();
+  saveGame();
 }
 
-function openLogPanel() {
-  ui.chatPanel.classList.toggle("hidden");
-  renderLogs();
+function placeBuilding(type) {
+  const x = player.x + Math.cos(player.dir) * 70;
+  const y = player.y + Math.sin(player.dir) * 70;
+  buildings.push({ type, x, y, hp: type === "hut" ? 160 : 100, built: true });
+  burst(x, y, type === "campfire" ? "#ffb15c" : "#c3955b", 20);
 }
 
-function openPanel(title, html) {
-  ui.panelTitle.textContent = title;
-  ui.panelBody.innerHTML = html;
+function nearest(list, range) {
+  let best = null; let bd = range;
+  list.forEach((o) => {
+    const d = Math.hypot(o.x - player.x, o.y - player.y) - (o.r || 0);
+    if (d < bd) { bd = d; best = o; }
+  });
+  return best;
+}
+
+function gainXp(v) {
+  player.xp += v;
+  const need = 70 + player.level * 45;
+  if (player.xp >= need) {
+    player.xp -= need;
+    player.level += 1;
+    player.hp = 100;
+    player.stamina = 100;
+    showToast(`升级到 ${player.level} 级。`);
+    burst(player.x, player.y, "#ffe58a", 42);
+  }
+}
+
+function render() {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+  const shakeX = rand(-cameraShake, cameraShake);
+  const shakeY = rand(-cameraShake, cameraShake);
+  ctx.save();
+  ctx.translate(w / 2 + shakeX, h / 2 + shakeY);
+  ctx.scale(camera.zoom, camera.zoom);
+  ctx.translate(-camera.x, -camera.y);
+  drawWorld();
+  drawObjects();
+  drawParticles(false);
+  drawLightAndWeather(w, h);
+  ctx.restore();
+  drawScreenWeather(w, h);
+  drawFloaters();
+  drawMinimap(w, h);
+}
+
+function drawWorld() {
+  const grd = ctx.createRadialGradient(0, 0, 60, 0, 0, WORLD * 0.5);
+  grd.addColorStop(0, "#608d45");
+  grd.addColorStop(0.55, "#47783b");
+  grd.addColorStop(0.88, "#d7b878");
+  grd.addColorStop(1, "#2779a9");
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(0, 0, WORLD * 0.54, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#4f8744";
+  for (let i = -1200; i <= 1200; i += 80) {
+    for (let j = -1200; j <= 1200; j += 80) {
+      const n = Math.sin(i * 0.013 + j * 0.007) + Math.cos(j * 0.017);
+      if (n > 0.6) {
+        ctx.globalAlpha = 0.11;
+        ctx.fillRect(i, j, 55, 3);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  drawLake(-330, -150, 185, 128);
+  drawLake(470, 520, 120, 80);
+  decals.forEach(drawDecal);
+}
+
+function drawLake(x, y, rx, ry) {
+  const water = ctx.createRadialGradient(x - rx * 0.2, y - ry * 0.2, 10, x, y, rx);
+  water.addColorStop(0, "#57c7e8");
+  water.addColorStop(0.65, "#2485c5");
+  water.addColorStop(1, "#17618c");
+  ctx.fillStyle = water;
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, -0.15, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(238,225,170,.75)";
+  ctx.lineWidth = 12;
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,.35)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 7; i += 1) {
+    ctx.beginPath();
+    ctx.ellipse(x + Math.sin(time + i) * rx * 0.45, y + Math.cos(time * 0.7 + i) * ry * 0.38, rx * 0.18, ry * 0.025, 0, 0, TAU);
+    ctx.stroke();
+  }
+}
+
+function drawDecal(d) {
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.rotate(d.a + Math.sin(time + d.x) * 0.05);
+  ctx.scale(d.s, d.s);
+  if (d.type === "flower") {
+    ctx.fillStyle = Math.random() < 0.5 ? "#e8d653" : "#f1a7d5";
+    ctx.fillRect(-2, -2, 4, 4);
+  } else {
+    ctx.strokeStyle = "#74a95b";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 4); ctx.lineTo(-4, -3); ctx.moveTo(0, 4); ctx.lineTo(4, -4); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawObjects() {
+  const drawables = [...resources, ...buildings, ...dinos, player].sort((a, b) => (a.y + (a.r || 0)) - (b.y + (b.r || 0)));
+  drawables.forEach((o) => {
+    if (o === player) drawPlayer();
+    else if (o.hp !== undefined && o.type && ["raptor", "trike", "stego"].includes(o.type)) drawDino(o);
+    else if (o.built) drawBuilding(o);
+    else drawResource(o);
+  });
+}
+
+function drawResource(o) {
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  drawShadow(0, 10, o.r * 1.15, o.r * 0.38);
+  if (o.type === "tree") {
+    const sway = Math.sin(time * 1.8 + o.sway) * 0.07;
+    ctx.rotate(sway);
+    ctx.fillStyle = "#76512f"; roundedRect(-7, -5, 14, 34, 5, true);
+    ["#2f6d35", "#3c8c43", "#74a94e"].forEach((c, i) => {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.arc((i - 1) * 13, -16 - i * 5, o.r * (0.62 - i * 0.06), 0, TAU);
+      ctx.fill();
+    });
+  } else if (o.type === "rock") {
+    ctx.rotate(o.rot);
+    ctx.fillStyle = "#687078"; polyBlob(o.r, 8);
+    ctx.fillStyle = "rgba(255,255,255,.18)"; polyBlob(o.r * 0.45, 5, -5, -5);
+  } else {
+    ctx.fillStyle = "#356f35"; polyBlob(o.r, 9);
+    ctx.fillStyle = "#d35270";
+    for (let i = 0; i < 5; i += 1) {
+      ctx.beginPath(); ctx.arc(Math.cos(i) * o.r * 0.45, Math.sin(i * 2) * o.r * 0.36, 3, 0, TAU); ctx.fill();
+    }
+  }
+  if (o.hp < o.maxHp) drawBar(-o.r, -o.r - 16, o.r * 2, 4, o.hp / o.maxHp, "#ffe27a");
+  ctx.restore();
+}
+
+function drawDino(d) {
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.rotate(d.dir);
+  drawShadow(0, 12, d.r * 1.45, d.r * 0.48);
+  ctx.fillStyle = d.hurt > 0 ? "#ffccc1" : d.color;
+  roundedRect(-d.r * 0.9, -d.r * 0.45, d.r * 1.7, d.r * 0.9, d.r * 0.35, true);
+  ctx.fillStyle = shade(d.color, 22);
+  roundedRect(d.r * 0.35, -d.r * 0.35, d.r * 0.85, d.r * 0.7, d.r * 0.2, true);
+  ctx.fillStyle = shade(d.color, -18);
+  ctx.beginPath(); ctx.moveTo(-d.r * 0.8, 0); ctx.lineTo(-d.r * 1.7, -d.r * 0.28); ctx.lineTo(-d.r * 1.25, d.r * 0.18); ctx.fill();
+  if (d.type === "trike") {
+    ctx.fillStyle = "#e9ddbd";
+    ctx.beginPath(); ctx.moveTo(d.r * 1.15, -8); ctx.lineTo(d.r * 1.65, -18); ctx.lineTo(d.r * 1.2, -2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(d.r * 1.15, 8); ctx.lineTo(d.r * 1.65, 18); ctx.lineTo(d.r * 1.2, 2); ctx.fill();
+  }
+  if (d.type === "stego") {
+    ctx.fillStyle = "#b47d55";
+    for (let i = -2; i <= 2; i += 1) {
+      ctx.beginPath(); ctx.moveTo(i * 14, -d.r * 0.42); ctx.lineTo(i * 14 + 7, -d.r * 0.95); ctx.lineTo(i * 14 + 15, -d.r * 0.42); ctx.fill();
+    }
+  }
+  ctx.fillStyle = "#130f0b";
+  ctx.beginPath(); ctx.arc(d.r * 0.92, -5, 2.2, 0, TAU); ctx.fill();
+  ctx.restore();
+  if (d.hp < d.maxHp) drawBar(d.x - d.r, d.y - d.r - 18, d.r * 2, 5, d.hp / d.maxHp, "#ff6b5c");
+}
+
+function drawBuilding(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  drawShadow(0, 12, 40, 16);
+  if (b.type === "campfire") {
+    ctx.fillStyle = "#605548";
+    ctx.beginPath(); ctx.arc(0, 0, 22, 0, TAU); ctx.fill();
+    ctx.fillStyle = "#8b5a31"; ctx.fillRect(-18, -4, 36, 8); ctx.rotate(Math.PI / 2); ctx.fillRect(-18, -4, 36, 8);
+    const img = images.flame;
+    if (img.complete) ctx.drawImage(img, -23, -45, 46, 52);
+  } else if (b.type === "hut") {
+    ctx.fillStyle = "#8b6236"; roundedRect(-42, -28, 84, 64, 10, true);
+    ctx.fillStyle = "#d0a15c"; ctx.beginPath(); ctx.moveTo(-54, -22); ctx.lineTo(0, -62); ctx.lineTo(54, -22); ctx.fill();
+    ctx.fillStyle = "#3c281c"; roundedRect(-10, 8, 20, 28, 5, true);
+  } else {
+    ctx.fillStyle = "#7c522e"; roundedRect(-30, -14, 60, 28, 6, true);
+    ctx.strokeStyle = "#d0a15c"; ctx.lineWidth = 3; ctx.strokeRect(-27, -11, 54, 22);
+  }
+  ctx.restore();
+}
+
+function drawPlayer() {
+  ctx.save();
+  ctx.translate(player.x, player.y);
+  ctx.rotate(player.dir);
+  drawShadow(0, 12, 20, 9);
+  ctx.fillStyle = "#273d31"; roundedRect(-12, -13, 28, 26, 10, true);
+  ctx.fillStyle = "#d8a66a"; ctx.beginPath(); ctx.arc(12, 0, 10, 0, TAU); ctx.fill();
+  ctx.fillStyle = "#704627"; ctx.beginPath(); ctx.arc(15, -4, 3, 0, TAU); ctx.fill();
+  ctx.strokeStyle = "#d7d2bf"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(8, 8); ctx.lineTo(38, 20); ctx.stroke();
+  ctx.restore();
+}
+
+function drawParticles(screenOnly) {
+  particles.forEach((p) => {
+    if (screenOnly !== !!p.screen) return;
+    const a = clamp(p.life / (p.max || 1), 0, 1);
+    ctx.save();
+    ctx.globalAlpha = a * (p.alpha || 1);
+    if (p.type === "rain") {
+      ctx.strokeStyle = "rgba(180,220,255,.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - 10, p.y + 28); ctx.stroke();
+    } else if (p.img && images[p.img]?.complete) {
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot || 0);
+      ctx.drawImage(images[p.img], -p.size / 2, -p.size / 2, p.size, p.size);
+    } else {
+      ctx.fillStyle = p.color || "#fff";
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+function drawLightAndWeather(w, h) {
+  const day = (Math.sin(time * 0.025) + 1) / 2;
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = `rgba(11,20,38,${0.18 + (1 - day) * 0.44})`;
+  ctx.fillRect(camera.x - w, camera.y - h, w * 2, h * 2);
+  ctx.restore();
+  buildings.filter((b) => b.type === "campfire").forEach((b) => radialLight(b.x, b.y, 170, "rgba(255,153,58,.34)"));
+  radialLight(player.x, player.y, 105, "rgba(255,232,168,.13)");
+}
+
+function drawScreenWeather(w, h) {
+  if (weather === "fog") {
+    ctx.fillStyle = "rgba(210,225,210,.12)";
+    for (let i = 0; i < 8; i += 1) {
+      ctx.fillRect(((time * 28 + i * 210) % (w + 260)) - 260, i * h / 8, 260, 44);
+    }
+  }
+  if (rainPower > 0.05) {
+    ctx.fillStyle = `rgba(40,70,90,${rainPower * 0.16})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+function drawFloaters() {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  floaters.forEach((f) => {
+    const sx = (f.x - camera.x) * camera.zoom + w / 2;
+    const sy = (f.y - camera.y) * camera.zoom + h / 2;
+    ctx.globalAlpha = clamp(f.life, 0, 1);
+    ctx.fillStyle = f.color;
+    ctx.font = "700 14px system-ui";
+    ctx.fillText(f.text, sx, sy);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function drawMinimap(w, h) {
+  const x = w - 132, y = h - 132, s = 108;
+  ctx.save();
+  ctx.globalAlpha = 0.86;
+  ctx.fillStyle = "rgba(10,20,18,.65)";
+  roundedRect(x, y, s, s, 18, true);
+  ctx.strokeStyle = "rgba(255,255,255,.16)";
+  ctx.stroke();
+  ctx.translate(x + s / 2, y + s / 2);
+  const scale = s / (WORLD * 1.05);
+  ctx.fillStyle = "#6ea052"; ctx.beginPath(); ctx.arc(0, 0, WORLD * 0.46 * scale, 0, TAU); ctx.fill();
+  ctx.fillStyle = "#308cc8"; ctx.beginPath(); ctx.ellipse(-330 * scale, -150 * scale, 185 * scale, 128 * scale, -0.15, 0, TAU); ctx.fill();
+  dinos.forEach((d) => { ctx.fillStyle = d.type === "raptor" ? "#ff6b5c" : "#ffe08a"; ctx.fillRect(d.x * scale - 1.5, d.y * scale - 1.5, 3, 3); });
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(player.x * scale, player.y * scale, 3, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function radialLight(x, y, r, color) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawShadow(x, y, rx, ry) {
+  ctx.fillStyle = "rgba(0,0,0,.24)";
+  ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.fill();
+}
+
+function drawBar(x, y, w, h, p, color) {
+  ctx.fillStyle = "rgba(0,0,0,.5)"; roundedRect(x, y, w, h, h / 2, true);
+  ctx.fillStyle = color; roundedRect(x, y, w * clamp(p, 0, 1), h, h / 2, true);
+}
+
+function roundedRect(x, y, w, h, r, fill) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  if (fill) ctx.fill(); else ctx.stroke();
+}
+
+function polyBlob(r, n, ox = 0, oy = 0) {
+  ctx.beginPath();
+  for (let i = 0; i < n; i += 1) {
+    const a = i / n * TAU;
+    const rr = r * (0.75 + Math.sin(i * 5.13) * 0.18);
+    const x = ox + Math.cos(a) * rr;
+    const y = oy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath(); ctx.fill();
+}
+
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = clamp((n >> 16) + amt, 0, 255);
+  const g = clamp(((n >> 8) & 255) + amt, 0, 255);
+  const b = clamp((n & 255) + amt, 0, 255);
+  return `rgb(${r},${g},${b})`;
+}
+
+function burst(x, y, color, count) {
+  for (let i = 0; i < count; i += 1) {
+    const a = rand(0, TAU), s = rand(45, 180);
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.35, 0.9), max: 0.9, size: rand(2, 6), grow: -2, color });
+  }
+}
+
+function dust(x, y, count) {
+  for (let i = 0; i < count; i += 1) particles.push({ x: x + rand(-8, 8), y: y + rand(-8, 8), vx: rand(-18, 18), vy: rand(-18, 18), life: 0.5, max: 0.5, size: rand(4, 9), grow: 8, color: "#cbb17b", alpha: 0.45 });
+}
+
+function slash(x, y, color) {
+  particles.push({ img: "slash", x, y, vx: 0, vy: 0, life: 0.18, max: 0.18, size: 74, rot: player.dir, color });
+}
+
+function blood(x, y, count) {
+  burst(x, y, "#9d2b25", count);
+}
+
+function ripple(x, y) {
+  for (let i = 0; i < 12; i += 1) particles.push({ x: x + rand(-15, 15), y: y + rand(-15, 15), vx: rand(-20, 20), vy: rand(-20, 20), life: 0.8, max: 0.8, size: rand(3, 8), grow: 12, color: "#9ee8ff", alpha: 0.45 });
+}
+
+function floatText(x, y, text, color) {
+  floaters.push({ x, y, text, color, life: 1 });
+}
+
+function openBag() {
+  ui.panelTitle.textContent = "背包";
+  ui.panelBody.innerHTML = `<div class="bag-list">${Object.entries(player.inv).map(([k, v]) => `<div class="bag-row"><span>${itemName(k)}</span><strong>×${v}</strong></div>`).join("")}</div>`;
   ui.panel.classList.remove("hidden");
 }
 
-function closePanel() {
-  ui.panel.classList.add("hidden");
+function openCraft() {
+  ui.panelTitle.textContent = "制作";
+  ui.panelBody.innerHTML = Object.entries(recipes).map(([k, r]) => {
+    const cost = Object.entries(r.cost).map(([ck, v]) => `${v}${itemName(ck)}`).join(" + ");
+    return `<div class="quest-row"><strong>${r.name}</strong><p>${cost}</p><button class="panel-action" data-craft="${k}">制作</button></div>`;
+  }).join("");
+  ui.panel.classList.remove("hidden");
 }
 
-function itemName(k) {
-  return {
-    wood: "木材",
-    stone: "石头",
-    fiber: "纤维",
-    berries: "浆果",
-    meat: "生肉",
-    hide: "兽皮",
-    spear: "石矛",
-  }[k] || k;
-}
-
-function log(text) {
-  logs.unshift({ t: Date.now(), text });
-  logs.splice(24);
-  renderLogs();
-}
-
-function renderLogs() {
-  if (!ui.chatMessages) return;
-  ui.chatMessages.innerHTML = logs.map((l) => `<div class="chat-line">${l.text}</div>`).join("");
-}
-
-function showToast(message) {
-  toastEl.textContent = message;
-  toastEl.classList.remove("hidden");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 2100);
+function openTasks() {
+  ui.panelTitle.textContent = "生存目标";
+  ui.panelBody.innerHTML = tasks.map((t) => `<div class="quest-row"><strong>${t.name}</strong><p>${t.text}</p><div class="progress"><span style="width:${clamp(player.quests[t.id] / t.goal, 0, 1) * 100}%"></span></div><em>${Math.min(player.quests[t.id], t.goal)}/${t.goal}</em></div>`).join("");
+  ui.panel.classList.remove("hidden");
 }
 
 function updateHud() {
-  const nearestThreat = dinos.reduce((m, d) => Math.min(m, d.userData.kind === "raptor" ? dist2(d.position, player.position) : 999), 999);
-  ui.hp.textContent = Math.round(state.hp);
-  ui.level.textContent = state.level;
-  ui.stamina.textContent = Math.round(state.stamina);
-  ui.needs.textContent = `${Math.round(state.hunger)}/${Math.round(state.thirst)}`;
-  ui.threat.textContent = nearestThreat < 10 ? "高" : nearestThreat < 28 ? "中" : "低";
-  ui.sync.textContent = `木${state.inventory.wood} 石${state.inventory.stone} 矛${state.inventory.spear}`;
+  ui.hp.textContent = Math.round(player.hp);
+  ui.level.textContent = player.level;
+  ui.stamina.textContent = Math.round(player.stamina);
+  ui.needs.textContent = `${Math.round(player.hunger)}/${Math.round(player.thirst)}`;
+  const threat = dinos.filter((d) => d.type === "raptor").reduce((m, d) => Math.min(m, Math.hypot(d.x - player.x, d.y - player.y)), 9999);
+  ui.threat.textContent = graceTimer > 0 ? "保护" : threat < 160 ? "高" : threat < 340 ? "中" : "低";
+  ui.sync.textContent = `木${player.inv.wood} 石${player.inv.stone} 浆${player.inv.berries}`;
 }
 
-function saveLocal() {
-  localStorage.setItem("arkLikeSurvival3D", JSON.stringify({
-    version: SAVE_VERSION,
-    state,
-    logs: logs.slice(0, 12),
-  }));
+function itemName(k) {
+  return { wood: "木材", stone: "石头", fiber: "纤维", berries: "浆果", meat: "生肉", hide: "兽皮", spear: "骨矛" }[k] || k;
 }
 
-function loadLocal() {
+function dinoName(t) {
+  return { raptor: "迅爪龙", trike: "角盾兽", stego: "剑背龙" }[t] || "恐龙";
+}
+
+function log(text) {
+  logs.unshift({ text, t: Date.now() });
+  logs.splice(24);
+  ui.chatMessages.innerHTML = logs.map((l) => `<div class="chat-line">${l.text}</div>`).join("");
+}
+
+function showToast(text) {
+  toastEl.textContent = text;
+  toastEl.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 2000);
+}
+
+function saveGame() {
+  localStorage.setItem(SAVE_KEY, JSON.stringify({ player, buildings, logs: logs.slice(0, 12) }));
+  showToast("已保存。");
+}
+
+function loadSave() {
   try {
-    const raw = JSON.parse(localStorage.getItem("arkLikeSurvival3D") || "null");
-    if (!raw?.state || raw.version !== SAVE_VERSION || raw.state.hp < 35) return;
-    Object.assign(state, raw.state);
+    const raw = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+    if (!raw?.player) return;
+    Object.assign(player, raw.player);
+    buildings.splice(0, buildings.length, ...(raw.buildings || buildings));
     logs.splice(0, logs.length, ...(raw.logs || []));
   } catch {}
 }
 
-function resizeCanvas() {
-  const rect = canvas.getBoundingClientRect();
-  const w = Math.max(1, Math.floor(rect.width || window.innerWidth));
-  const h = Math.max(1, Math.floor(rect.height || window.innerHeight));
-  if (fallback2D) {
-    canvas.width = w;
-    canvas.height = h;
-    return;
-  }
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-}
-
-async function startGame() {
-  state.name = $("#playerName").value.trim() || "幸存者";
-  startScreen.classList.remove("active");
-  gameScreen.classList.remove("hidden");
-  showToast("正在加载 3D 素材...");
-  if (!scene && !fallback2D) await init();
-  loadLocal();
-  if (state.hp < 70) {
-    state.hp = 100;
-    state.hunger = Math.max(state.hunger, 85);
-    state.thirst = Math.max(state.thirst, 85);
-  }
-  started = true;
-  resizeCanvas();
-  requestAnimationFrame(resizeCanvas);
-  showToast("进入荒岛：采集、饮水、制作、战斗。");
+function bindEvents() {
+  $("#startGame").addEventListener("click", startGame);
+  $("#openBackend").addEventListener("click", () => showToast("2D 极致版为本地单机原型，不需要后端。"));
+  $("#closeBackend")?.addEventListener("click", () => $("#backendPanel").classList.add("hidden"));
+  $("#saveBackend")?.addEventListener("click", () => $("#backendPanel").classList.add("hidden"));
+  $("#plantBtn").addEventListener("click", gather);
+  $("#waterBtn").addEventListener("click", drinkOrEat);
+  $("#harvestBtn").addEventListener("click", attack);
+  $("#shopBtn").addEventListener("click", () => openCraft());
+  $("#bagBtn").addEventListener("click", openBag);
+  $("#questBtn").addEventListener("click", openTasks);
+  $("#sleepBtn").addEventListener("click", () => { player.hp = clamp(player.hp + 25, 0, 100); player.stamina = 100; player.hunger -= 6; player.thirst -= 6; showToast("在营火旁休息了一会。"); });
+  $("#chatToggle").addEventListener("click", () => ui.chatPanel.classList.toggle("hidden"));
+  $("#closeChat").addEventListener("click", () => ui.chatPanel.classList.add("hidden"));
+  $("#syncNow").addEventListener("click", saveGame);
+  $("#panelClose").addEventListener("click", () => ui.panel.classList.add("hidden"));
+  ui.panelBody.addEventListener("click", (e) => {
+    const kind = e.target.closest("[data-craft]")?.dataset.craft;
+    if (kind) craft(kind);
+  });
+  $("#chatForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const t = ui.chatInput.value.trim();
+    if (t) log(`笔记：${t}`);
+    ui.chatInput.value = "";
+  });
+  $("#toolToggle").addEventListener("click", () => {
+    $("#controlsPanel").classList.toggle("collapsed");
+    $("#cropBar").classList.toggle("collapsed");
+  });
+  window.addEventListener("keydown", (e) => {
+    keys.add(e.code);
+    if (e.code === "KeyE") gather();
+    if (e.code === "KeyQ") drinkOrEat();
+    if (e.code === "KeyF") attack();
+    if (e.code === "KeyB") openCraft();
+  });
+  window.addEventListener("keyup", (e) => keys.delete(e.code));
+  window.addEventListener("resize", resizeCanvas);
+  canvas.addEventListener("pointermove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    pointerAim.x = (e.clientX - rect.left - rect.width / 2) / camera.zoom + camera.x;
+    pointerAim.y = (e.clientY - rect.top - rect.height / 2) / camera.zoom + camera.y;
+    player.dir = Math.atan2(pointerAim.y - player.y, pointerAim.x - player.x);
+  });
+  canvas.addEventListener("click", attack);
+  bindJoystick();
 }
 
 function bindJoystick() {
   const base = $("#joystick");
   const stick = $("#joystickStick");
-  if (!base || !stick) return;
   let active = false;
-  const reset = () => {
-    active = false;
-    joystick = { x: 0, y: 0 };
-    stick.style.transform = "translate(-50%, -50%)";
-  };
-  const move = (event) => {
+  const reset = () => { active = false; joystick = { x: 0, y: 0 }; stick.style.transform = "translate(-50%, -50%)"; };
+  const move = (e) => {
     if (!active) return;
-    const rect = base.getBoundingClientRect();
-    const radius = rect.width / 2;
-    const cx = rect.left + radius;
-    const cy = rect.top + radius;
-    const rawX = event.clientX - cx;
-    const rawY = event.clientY - cy;
-    const dist = Math.hypot(rawX, rawY);
-    const max = radius * 0.55;
-    const scale = dist > max ? max / dist : 1;
-    stick.style.transform = `translate(calc(-50% + ${rawX * scale}px), calc(-50% + ${rawY * scale}px))`;
-    joystick = { x: clamp(rawX / max, -1, 1), y: clamp(rawY / max, -1, 1) };
+    const r = base.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2, max = r.width * 0.28;
+    const x = clamp(e.clientX - cx, -max, max), y = clamp(e.clientY - cy, -max, max);
+    joystick = { x: x / max, y: y / max };
+    stick.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
   };
-  base.addEventListener("pointerdown", (e) => {
-    active = true;
-    base.setPointerCapture?.(e.pointerId);
-    move(e);
-  });
+  base.addEventListener("pointerdown", (e) => { active = true; base.setPointerCapture?.(e.pointerId); move(e); });
   base.addEventListener("pointermove", move);
   base.addEventListener("pointerup", reset);
   base.addEventListener("pointercancel", reset);
 }
 
-function bindEvents() {
-  $("#startGame").addEventListener("click", startGame);
-  $("#openBackend").addEventListener("click", () => backendPanel.classList.remove("hidden"));
-  $("#closeBackend").addEventListener("click", () => backendPanel.classList.add("hidden"));
-  $("#saveBackend").addEventListener("click", () => {
-    backendPanel.classList.add("hidden");
-    showToast("3D 单机原型不需要后端，已关闭设置面板。");
-  });
-  $("#plantBtn").addEventListener("click", gather);
-  $("#waterBtn").addEventListener("click", drinkOrEat);
-  $("#harvestBtn").addEventListener("click", attack);
-  $("#shopBtn").addEventListener("click", build);
-  $("#bagBtn").addEventListener("click", openBag);
-  $("#questBtn").addEventListener("click", openCraft);
-  $("#sleepBtn").addEventListener("click", () => {
-    state.hunger = clamp(state.hunger - 8, 0, 100);
-    state.thirst = clamp(state.thirst - 8, 0, 100);
-    state.hp = clamp(state.hp + 28, 0, 100);
-    state.stamina = 100;
-    showToast("在营地短暂休息，生命和体力恢复。");
-  });
-  $("#chatToggle").addEventListener("click", openLogPanel);
-  $("#closeChat").addEventListener("click", () => ui.chatPanel.classList.add("hidden"));
-  $("#syncNow").addEventListener("click", () => {
-    saveLocal();
-    showToast("本地存档已保存");
-  });
-  $("#chatForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const text = ui.chatInput.value.trim();
-    if (text) log(`笔记：${text}`);
-    ui.chatInput.value = "";
-  });
-  $("#panelClose").addEventListener("click", closePanel);
-  ui.panelBody.addEventListener("click", (e) => {
-    const craftKind = e.target.closest("[data-craft]")?.dataset.craft;
-    if (craftKind) craft(craftKind);
-  });
-  $("#toolToggle").addEventListener("click", () => {
-    const controls = $("#controlsPanel");
-    const cropBar = $("#cropBar");
-    const open = controls.classList.toggle("collapsed") === false;
-    cropBar.classList.toggle("collapsed", !open);
-    $("#toolToggle").classList.toggle("open", open);
-    $("#toolToggle").setAttribute("aria-expanded", String(open));
-  });
-
-  window.addEventListener("keydown", (e) => {
-    keys.add(e.code);
-    if (e.code === "KeyE") gather();
-    if (e.code === "KeyF") attack();
-    if (e.code === "KeyB") build();
-    if (e.code === "KeyQ") drinkOrEat();
-  });
-  window.addEventListener("keyup", (e) => keys.delete(e.code));
-  window.addEventListener("resize", resizeCanvas);
-
-  let dragging = false;
-  let lastX = 0;
-  canvas.addEventListener("pointerdown", (e) => {
-    dragging = true;
-    lastX = e.clientX;
-    canvas.setPointerCapture?.(e.pointerId);
-  });
-  canvas.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    yaw -= (e.clientX - lastX) * 0.008;
-    lastX = e.clientX;
-  });
-  canvas.addEventListener("pointerup", () => { dragging = false; });
-  canvas.addEventListener("pointercancel", () => { dragging = false; });
-  bindJoystick();
-}
-
-function loop() {
-  const dt = Math.min(0.033, clock.getDelta());
-  update(dt);
-  if (fallback2D) renderFallback2D();
-  if (renderer && scene && camera) renderer.render(scene, camera);
+function loop(now) {
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+  if (started) update(dt);
+  render();
   requestAnimationFrame(loop);
 }
 
+initWorld();
+resizeCanvas();
 bindEvents();
-loop();
+requestAnimationFrame(loop);

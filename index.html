@@ -3,19 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#101820" />
-    <title>原始方舟 · 3D 恐龙生存</title>
+    <meta name="theme-color" content="#122019" />
+    <title>原始方舟 · 2D 极致恐龙生存</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=19" />
-    <link rel="stylesheet" href="./src/styles.css?v=19" />
+    <link rel="manifest" href="./manifest.webmanifest?v=23" />
+    <link rel="stylesheet" href="./src/styles.css?v=23" />
   </head>
   <body>
     <main id="app">
       <section id="startScreen" class="screen active">
         <div class="hero-card">
-          <p class="eyebrow">3D 恐龙荒岛生存原型</p>
+          <p class="eyebrow">2D 顶视角恐龙荒岛生存</p>
           <h1>原始方舟</h1>
-          <p class="subtitle">采集木材和石头，喝水进食，建造营火和地基，躲避或击退游荡的恐龙，在荒岛上活下去。</p>
+          <p class="subtitle">动态光照、雨雾天气、粒子特效、建造营地、采集制作、恐龙 AI 和完整生存循环，先把 2D 鸡头做到能玩好看。</p>
           <div class="start-grid">
             <label>
               玩家昵称
@@ -28,25 +28,25 @@
           </div>
           <div class="button-row">
             <button id="startGame" class="primary">开始游戏</button>
-            <button id="openBackend" class="ghost">GitHub 后端设置</button>
+            <button id="openBackend" class="ghost">说明</button>
           </div>
-          <p class="note">原创 3D 生存原型，不使用《方舟：生存进化》的受版权素材、模型或名称。键盘 WASD 移动，鼠标拖动转向，手机用摇杆。</p>
+          <p class="note">原创 2D 生存原型，不使用《方舟：生存进化》的受版权素材、模型或名称。WASD 移动，鼠标瞄准/点击攻击，E 采集，Q 饮水/进食，F 攻击。</p>
         </div>
       </section>
 
       <section id="backendPanel" class="panel hidden">
         <div class="panel-card">
           <button id="closeBackend" class="icon-button" aria-label="关闭">×</button>
-          <h2>GitHub 后端设置</h2>
-          <p>GitHub 不适合真正实时服务器，这里用仓库文件做轻量房间存档。请使用细粒度 Personal Access Token，不要填写账号密码。</p>
+          <h2>2D 极致版说明</h2>
+          <p>当前版本改为 Canvas 2D 顶视角生存，优先保证画面、性能、手感和玩法完整度。本地自动存档，不需要后端。</p>
           <div class="form-grid">
             <label>GitHub 用户名<input id="ghOwner" placeholder="magao520" /></label>
             <label>仓库名<input id="ghRepo" placeholder="cloud-farm-save" /></label>
             <label>分支<input id="ghBranch" placeholder="main" /></label>
             <label>Token<input id="ghToken" type="password" placeholder="仅保存在本机浏览器" /></label>
           </div>
-          <button id="saveBackend" class="primary full">保存设置</button>
-          <p class="note danger">安全建议：你刚才发出的密码应立即修改。游戏不会、也不应该保存 GitHub 密码。</p>
+          <button id="saveBackend" class="primary full">知道了</button>
+          <p class="note danger">素材仅使用 CC0/可商用来源或程序化绘制，不直接复制商业游戏素材。</p>
         </div>
       </section>
 
@@ -61,8 +61,8 @@
         </div>
         <div class="hud sync">
           <button id="bagBtn" class="mini">背包</button>
-          <button id="questBtn" class="mini">制作</button>
-          <button id="sleepBtn" class="mini">营火</button>
+          <button id="questBtn" class="mini">目标</button>
+          <button id="sleepBtn" class="mini">休息</button>
           <button id="chatToggle" class="mini">日志</button>
           <button id="syncNow" class="mini">保存</button>
           <span id="syncStatus">本地模式</span>
@@ -89,7 +89,7 @@
             <button id="plantBtn"><span>🪓</span>采集</button>
             <button id="waterBtn"><span>💧</span>饮水</button>
             <button id="harvestBtn"><span>🗡</span>攻击</button>
-            <button id="shopBtn"><span>⛺</span>建造</button>
+            <button id="shopBtn"><span>⛺</span>制作</button>
           </div>
         </div>
         <section id="rpgPanel" class="rpg-panel hidden">
@@ -104,6 +104,6 @@
 
       <section id="rotateTip" class="rotate-tip" aria-hidden="true"></section>
     </main>
-    <script type="module" src="./src/game.js?v=19"></script>
+    <script type="module" src="./src/game.js?v=23"></script>
   </body>
 </html>

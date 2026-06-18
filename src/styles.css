@@ -57,7 +57,7 @@ button {
     radial-gradient(circle at 30% 20%, rgba(255, 220, 130, 0.18), transparent 55%),
     radial-gradient(circle at 80% 80%, rgba(85, 211, 123, 0.20), transparent 60%),
     linear-gradient(180deg, #0e1b17 0%, #143a26 100%);
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
 .screen.active {
@@ -670,6 +670,25 @@ canvas {
   color: #102017;
   background: var(--gold);
   font-weight: 900;
+}
+
+.progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #78f08d, #ffe07a);
+}
+
+.quest-row em {
+  color: rgba(255, 243, 212, 0.76);
+  font-style: normal;
 }
 
 .rotate-tip {
