@@ -1,12 +1,12 @@
 {
   "name": "云上菜园",
   "short_name": "云上菜园",
-  "description": "横板联机种菜手机游戏原型",
+  "description": "竖屏联机种菜、背包和集市交易游戏原型",
   "start_url": "./index.html",
   "display": "fullscreen",
-  "orientation": "landscape",
-  "background_color": "#0e1b17",
-  "theme_color": "#13251d",
+  "orientation": "portrait",
+  "background_color": "#ffe6b8",
+  "theme_color": "#f6dca8",
   "icons": [
     {
       "src": "./assets/icon.svg",

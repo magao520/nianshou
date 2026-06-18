@@ -3,107 +3,82 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#122019" />
-    <title>原始方舟 · 2D 极致恐龙生存</title>
+    <meta name="theme-color" content="#f6dca8" />
+    <title>云上菜园 · 联机种菜系统</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=26" />
-    <link rel="stylesheet" href="./src/styles.css?v=26" />
+    <link rel="manifest" href="./manifest.webmanifest?v=32" />
+    <link rel="stylesheet" href="./src/styles.css?v=32" />
   </head>
   <body>
     <main id="app">
-      <section id="startScreen" class="screen active">
-        <div class="hero-card">
-          <p class="eyebrow">2D 顶视角恐龙荒岛生存</p>
-          <h1>原始方舟</h1>
-          <p class="subtitle">动态光照、雨雾天气、粒子特效、建造营地、采集制作、恐龙 AI 和完整生存循环，先把 2D 鸡头做到能玩好看。</p>
-          <div class="start-grid">
-            <label>
-              玩家昵称
-              <input id="playerName" maxlength="14" placeholder="菜园主" />
-            </label>
-            <label>
-              地图频道
-              <input id="roomCode" maxlength="20" placeholder="PUBLIC-FARM" />
-            </label>
+      <section id="entry" class="entry active">
+        <div class="sunburst"></div>
+        <div class="cloud cloud-a"></div>
+        <div class="cloud cloud-b"></div>
+        <div class="entry-card">
+          <div class="logo-orb">
+            <span></span>
           </div>
-          <div class="button-row">
-            <button id="startGame" class="primary">开始游戏</button>
-            <button id="openBackend" class="ghost">说明</button>
+          <p class="eyebrow">ONLINE FARMING SIM</p>
+          <h1>云上菜园</h1>
+          <p class="subtitle">种菜、收菜、变异蔬菜、玩家在线状态、背包和集市交易，全套竖屏种菜系统。</p>
+          <div class="entry-grid">
+            <label>玩家昵称<input id="playerName" maxlength="14" placeholder="菜园主" /></label>
+            <label>联机房间<input id="roomCode" maxlength="24" value="PUBLIC-FARM" /></label>
           </div>
-          <p class="note">原创 2D 生存原型，不使用《方舟：生存进化》的受版权素材、模型或名称。WASD 移动，鼠标瞄准/点击攻击，E 采集，Q 饮水/进食，F 攻击。</p>
+          <button id="enterGame" class="primary">进入菜园</button>
+          <button id="openSyncInfo" class="link-button">同步说明</button>
         </div>
       </section>
 
-      <section id="backendPanel" class="panel hidden">
-        <div class="panel-card">
-          <button id="closeBackend" class="icon-button" aria-label="关闭">×</button>
-          <h2>2D 极致版说明</h2>
-          <p>当前版本改为 Canvas 2D 顶视角生存，优先保证画面、性能、手感和玩法完整度。本地自动存档，不需要后端。</p>
-          <div class="form-grid">
-            <label>GitHub 用户名<input id="ghOwner" placeholder="magao520" /></label>
-            <label>仓库名<input id="ghRepo" placeholder="cloud-farm-save" /></label>
-            <label>分支<input id="ghBranch" placeholder="main" /></label>
-            <label>Token<input id="ghToken" type="password" placeholder="仅保存在本机浏览器" /></label>
-          </div>
-          <button id="saveBackend" class="primary full">知道了</button>
-          <p class="note danger">素材仅使用 CC0/可商用来源或程序化绘制，不直接复制商业游戏素材。</p>
-        </div>
-      </section>
+      <section id="game" class="game hidden">
+        <canvas id="farmCanvas" aria-label="云上菜园画布"></canvas>
 
-      <section id="gameScreen" class="game-shell hidden">
-        <canvas id="gameCanvas" width="960" height="540" aria-label="游戏画布"></canvas>
-        <div class="hud top">
-          <div class="stat"><span>生命</span><strong id="coinText">100</strong></div>
-          <div class="stat"><span>等级</span><strong id="levelText">1</strong></div>
-          <div class="stat"><span>体力</span><strong id="energyText">100</strong></div>
-          <div class="stat"><span>饥渴</span><strong id="dateText">100/100</strong></div>
-          <div class="stat"><span>威胁</span><strong id="roomText">低</strong></div>
-        </div>
-        <div class="hud sync">
-          <button id="bagBtn" class="mini">背包</button>
-          <button id="questBtn" class="mini">目标</button>
-          <button id="sleepBtn" class="mini">休息</button>
-          <button id="chatToggle" class="mini">日志</button>
-          <button id="syncNow" class="mini">保存</button>
-          <span id="syncStatus">本地模式</span>
-        </div>
-        <aside id="chatPanel" class="chat-panel hidden">
+        <header class="topbar">
+          <div>
+            <small>金币</small>
+            <strong id="coinText">0</strong>
+          </div>
+          <div>
+            <small>仓库</small>
+            <strong id="bagText">0</strong>
+          </div>
+          <div>
+            <small>同步</small>
+            <strong id="syncText">本地</strong>
+          </div>
+        </header>
+
+        <section class="seed-strip" id="seedStrip"></section>
+
+        <nav class="dock">
+          <button data-panel="garden" class="active">菜园</button>
+          <button data-panel="bag">背包</button>
+          <button data-panel="market">集市</button>
+          <button data-panel="players">玩家</button>
+        </nav>
+
+        <aside id="sheet" class="sheet hidden">
           <header>
-            <strong>生存日志</strong>
-            <button id="closeChat" aria-label="关闭公屏">×</button>
+            <strong id="sheetTitle">菜单</strong>
+            <button id="closeSheet">×</button>
           </header>
-          <div id="chatMessages" class="chat-messages"></div>
-          <form id="chatForm" class="chat-form">
-            <input id="chatInput" maxlength="60" placeholder="记录一句生存笔记..." />
-            <button type="submit">发送</button>
-          </form>
+          <div id="sheetBody" class="sheet-body"></div>
         </aside>
-        <button id="toolToggle" class="tool-toggle open" aria-expanded="true">工具</button>
-        <div class="crop-bar" id="cropBar"></div>
-        <div class="controls" id="controlsPanel">
-          <div class="joystick" id="joystick" aria-label="移动摇杆">
-            <div class="joystick-ring"></div>
-            <div class="joystick-stick" id="joystickStick"></div>
-          </div>
-          <div class="action-pad">
-            <button id="plantBtn"><span>🪓</span>采集</button>
-            <button id="waterBtn"><span>💧</span>饮水</button>
-            <button id="harvestBtn"><span>🗡</span>攻击</button>
-            <button id="shopBtn"><span>⛺</span>制作</button>
-          </div>
-        </div>
-        <section id="rpgPanel" class="rpg-panel hidden">
-          <header>
-            <strong id="panelTitle">菜单</strong>
-            <button id="panelClose" aria-label="关闭">×</button>
-          </header>
-          <div id="panelBody" class="panel-body"></div>
-        </section>
+
         <div id="toast" class="toast hidden"></div>
       </section>
 
-      <section id="rotateTip" class="rotate-tip" aria-hidden="true"></section>
+      <section id="syncInfo" class="modal hidden">
+        <div class="modal-card">
+          <button id="closeSyncInfo" class="close">×</button>
+          <h2>同步说明</h2>
+          <p>当前版本使用“本地优先房间数据模型”：每次操作都会先安全写入本机房间存档，并通过浏览器同步事件合并，避免退出重进丢失、覆盖和半写入。</p>
+          <p>真正跨设备公网联机需要部署一个后端端点保存房间状态；不能把数据库密钥或 GitHub Token 写进前端网页，否则别人能直接拿走。</p>
+        </div>
+      </section>
     </main>
-    <script type="module" src="./src/game.js?v=26"></script>
+
+    <script type="module" src="./src/game.js?v=32"></script>
   </body>
 </html>
