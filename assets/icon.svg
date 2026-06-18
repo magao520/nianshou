@@ -1,21 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#a8ff78"/>
-      <stop offset="1" stop-color="#1d8f53"/>
+    <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#9be8ff"/>
+      <stop offset=".58" stop-color="#d9f7bd"/>
+      <stop offset="1" stop-color="#ffd58c"/>
     </linearGradient>
-    <linearGradient id="soil" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#b87342"/>
+    <linearGradient id="leaf" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#b5ff7e"/>
+      <stop offset="1" stop-color="#28a95a"/>
+    </linearGradient>
+    <linearGradient id="soil" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#b87945"/>
       <stop offset="1" stop-color="#65361f"/>
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="120" fill="#102017"/>
-  <circle cx="382" cy="108" r="58" fill="#ffd166"/>
-  <path d="M74 330c70-70 137-108 220-114 67-5 116 9 170 40v172H74z" fill="url(#bg)"/>
-  <ellipse cx="256" cy="334" rx="156" ry="58" fill="url(#soil)"/>
-  <path d="M256 318c-5-70 20-130 86-172-12 74-36 130-86 172z" fill="#55d37b"/>
-  <path d="M252 318c-42-58-88-84-150-86 38 58 84 88 150 86z" fill="#7ee787"/>
-  <circle cx="262" cy="252" r="52" fill="#ff6b3d"/>
-  <path d="M234 220c18-22 45-28 76-19-12-20-36-32-65-23-18 6-30 20-35 36z" fill="#fff3d4" opacity=".35"/>
-  <path d="M258 204c2-28 22-50 54-65" stroke="#55d37b" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <rect width="512" height="512" rx="120" fill="url(#sky)"/>
+  <circle cx="386" cy="104" r="56" fill="#fff07a"/>
+  <path d="M36 316c80-70 154-100 230-94 74 5 136 36 210 92v138H36z" fill="#62c96b"/>
+  <rect x="96" y="280" width="320" height="130" rx="42" fill="url(#soil)"/>
+  <path d="M125 318h262M125 356h262" stroke="#e7b77a" stroke-width="14" stroke-linecap="round" opacity=".65"/>
+  <path d="M256 292c-8-88 28-158 108-207-11 94-43 162-108 207z" fill="url(#leaf)"/>
+  <path d="M251 294c-54-70-113-103-188-101 48 70 105 106 188 101z" fill="#7de079"/>
+  <path d="M252 292c-2-55 20-100 67-135" stroke="#267f45" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M222 253c42-33 99-28 133 10 40 46 8 110-59 112-65 3-115-43-74-122z" fill="#ff8a3d"/>
+  <path d="M240 245c30-25 72-25 101 0-14-38-58-54-97-35-16 8-28 20-36 36z" fill="#fff4c0" opacity=".34"/>
 </svg>

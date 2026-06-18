@@ -6,12 +6,13 @@
     <meta name="theme-color" content="#f6dca8" />
     <title>云上菜园 · 联机种菜系统</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=34" />
-    <link rel="stylesheet" href="./src/styles.css?v=34" />
+    <link rel="manifest" href="./manifest.webmanifest?v=35" />
+    <link rel="stylesheet" href="./src/styles.css?v=35" />
   </head>
   <body>
     <main id="app">
       <section id="entry" class="entry active">
+        <div class="entry-art"></div>
         <div class="sunburst"></div>
         <div class="cloud cloud-a"></div>
         <div class="cloud cloud-b"></div>
@@ -47,7 +48,17 @@
           </div>
         </header>
 
+        <button id="seedToggle" class="floating-toggle seed-toggle">种子</button>
         <section class="seed-strip" id="seedStrip"></section>
+
+        <button id="toolToggle" class="floating-toggle tool-toggle">工具</button>
+        <section class="action-tray" id="actionTray">
+          <button id="harvestReady">采摘成熟</button>
+          <button id="sellReady">出售成熟</button>
+          <button id="closeTrays">收起</button>
+        </section>
+
+        <button id="menuToggle" class="floating-toggle menu-toggle">菜单</button>
 
         <nav class="dock">
           <button data-panel="garden" class="active">菜园</button>
@@ -64,11 +75,22 @@
           <div id="sheetBody" class="sheet-body"></div>
         </aside>
 
+        <section id="listingModal" class="listing-modal hidden">
+          <div class="listing-card">
+            <button id="closeListingModal" class="close-mini">×</button>
+            <h3 id="listingTitle">上架商品</h3>
+            <p id="listingHint">设置数量和价格后上架到集市。</p>
+            <label>数量<input id="listingQty" inputmode="numeric" value="1" /></label>
+            <label>单价<input id="listingPrice" inputmode="numeric" value="9" /></label>
+            <button id="confirmListing" class="primary">确认上架</button>
+          </div>
+        </section>
+
         <div id="toast" class="toast hidden"></div>
       </section>
 
     </main>
 
-    <script type="module" src="./src/game.js?v=34"></script>
+    <script type="module" src="./src/game.js?v=35"></script>
   </body>
 </html>
