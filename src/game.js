@@ -1,5 +1,7 @@
 const canvas = document.querySelector("#gameCanvas");
 const ctx = canvas.getContext("2d");
+const BASE_WIDTH = 960;
+const BASE_HEIGHT = 540;
 
 const $ = (selector) => document.querySelector(selector);
 const startScreen = $("#startScreen");
@@ -218,7 +220,7 @@ function renderCropBar() {
   crops.forEach((crop) => {
     const button = document.createElement("button");
     button.className = `crop-choice ${selectedCrop === crop.id ? "active" : ""}`;
-    button.innerHTML = `${crop.matureIcon}<br><small>${crop.cost} 金</small>`;
+    button.innerHTML = `<span>${crop.matureIcon}</span><strong>${crop.name.replace("樱桃", "")}</strong><small>${crop.cost} 金</small>`;
     button.title = crop.name;
     button.addEventListener("click", () => {
       selectedCrop = crop.id;
@@ -490,8 +492,8 @@ function bindHold(button, direction) {
 }
 
 function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  canvas.width = BASE_WIDTH;
+  canvas.height = BASE_HEIGHT;
 }
 
 function readBackendConfig() {
@@ -690,7 +692,13 @@ function bindEvents() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+    navigator.serviceWorker.register("./sw.js").then((registration) => registration.update()).catch(() => {});
   }
 }
 

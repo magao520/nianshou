@@ -1,10 +1,10 @@
-const CACHE_NAME = "cloud-farm-v1";
+const CACHE_NAME = "cloud-farm-v3";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest",
-  "./src/styles.css",
-  "./src/game.js",
+  "./manifest.webmanifest?v=2",
+  "./src/styles.css?v=2",
+  "./src/game.js?v=2",
   "./assets/icon.svg",
   "./assets/verdant-terraces-bg.jpg",
 ];
@@ -25,5 +25,25 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  const request = event.request;
+  const wantsFresh =
+    request.mode === "navigate" ||
+    request.destination === "script" ||
+    request.destination === "style" ||
+    request.destination === "manifest";
+
+  if (wantsFresh) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          return response;
+        })
+        .catch(() => caches.match(request)),
+    );
+    return;
+  }
+
+  event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
 });
