@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#13251d" />
+    <title>云上菜园 · 横板联机种菜</title>
+    <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="startScreen" class="screen active">
+        <div class="hero-card">
+          <p class="eyebrow">横板联机种菜手游原型</p>
+          <h1>云上菜园</h1>
+          <p class="subtitle">种植、浇水、收获、升级，与好友共享同一片云端农场。</p>
+          <div class="start-grid">
+            <label>
+              玩家昵称
+              <input id="playerName" maxlength="14" placeholder="菜园主" />
+            </label>
+            <label>
+              房间码
+              <input id="roomCode" maxlength="20" placeholder="FARM-520" />
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="startGame" class="primary">开始游戏</button>
+            <button id="openBackend" class="ghost">GitHub 后端设置</button>
+          </div>
+          <p class="note">提示：没有配置 GitHub Token 时，可先玩本地模式；配置后可用仓库文件同步房间。</p>
+        </div>
+      </section>
+
+      <section id="backendPanel" class="panel hidden">
+        <div class="panel-card">
+          <button id="closeBackend" class="icon-button" aria-label="关闭">×</button>
+          <h2>GitHub 后端设置</h2>
+          <p>GitHub 不适合真正实时服务器，这里用仓库文件做轻量房间存档。请使用细粒度 Personal Access Token，不要填写账号密码。</p>
+          <div class="form-grid">
+            <label>GitHub 用户名<input id="ghOwner" placeholder="magao520" /></label>
+            <label>仓库名<input id="ghRepo" placeholder="cloud-farm-save" /></label>
+            <label>分支<input id="ghBranch" placeholder="main" /></label>
+            <label>Token<input id="ghToken" type="password" placeholder="仅保存在本机浏览器" /></label>
+          </div>
+          <button id="saveBackend" class="primary full">保存设置</button>
+          <p class="note danger">安全建议：你刚才发出的密码应立即修改。游戏不会、也不应该保存 GitHub 密码。</p>
+        </div>
+      </section>
+
+      <section id="gameScreen" class="game-shell hidden">
+        <canvas id="gameCanvas" width="960" height="540" aria-label="游戏画布"></canvas>
+        <div class="hud top">
+          <div class="stat"><span>金币</span><strong id="coinText">0</strong></div>
+          <div class="stat"><span>等级</span><strong id="levelText">1</strong></div>
+          <div class="stat"><span>水量</span><strong id="waterText">100</strong></div>
+          <div class="stat"><span>房间</span><strong id="roomText">本地</strong></div>
+        </div>
+        <div class="hud sync">
+          <button id="syncNow" class="mini">同步</button>
+          <span id="syncStatus">本地模式</span>
+        </div>
+        <div class="crop-bar" id="cropBar"></div>
+        <div class="controls">
+          <div class="move-pad">
+            <button id="leftBtn" aria-label="向左">‹</button>
+            <button id="rightBtn" aria-label="向右">›</button>
+          </div>
+          <div class="action-pad">
+            <button id="plantBtn">播种</button>
+            <button id="waterBtn">浇水</button>
+            <button id="harvestBtn">收获</button>
+            <button id="shopBtn">扩建</button>
+          </div>
+        </div>
+        <div id="toast" class="toast hidden"></div>
+      </section>
+
+      <section id="rotateTip" class="rotate-tip">
+        <div>
+          <strong>请横屏游玩</strong>
+          <span>横板菜园在横屏下体验最佳。</span>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./src/game.js"></script>
+  </body>
+</html>
