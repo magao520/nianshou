@@ -52,6 +52,8 @@ const MAP_W = 64;            // 瓦片地图宽
 const MAP_H = 40;            // 瓦片地图高
 const WORLD_W = MAP_W * TILE; // 1024
 const WORLD_H = MAP_H * TILE; // 640
+const ONE_D_TILE_Y = 22;
+const ONE_D_Y = ONE_D_TILE_Y * TILE + TILE / 2;
 const PLAYER_SPEED = 72;     // 像素/秒
 const FIXED_DT = 1 / 60;
 
@@ -731,7 +733,7 @@ function buildLevel() {
   overlayMap = new Array(MAP_W * MAP_H).fill(-1);
   collisionMap = new Array(MAP_W * MAP_H).fill(0);
 
-  // 草地填底，加随机花/石
+  // 1D 草地背景：所有玩法集中在一条横向路线。
   for (let y = 0; y < MAP_H; y += 1) {
     for (let x = 0; x < MAP_W; x += 1) {
       const r = (x * 31 + y * 17) % 100;
@@ -740,37 +742,28 @@ function buildLevel() {
     }
   }
 
-  // 一条横向主路 + 一条纵向路
-  for (let x = 2; x < MAP_W - 2; x += 1) {
-    setTile(groundMap, x, 22, 3);
-    overlayMap[22 * MAP_W + x] = -1;
-  }
-  for (let y = 4; y < MAP_H - 4; y += 1) {
-    setTile(groundMap, 28, y, 3);
-    overlayMap[y * MAP_W + 28] = -1;
-  }
-
-  // 池塘
-  for (let y = 28; y < 33; y += 1) {
-    for (let x = 44; x < 52; x += 1) {
-      setTile(groundMap, x, y, ((x + y) % 2) ? 4 : 5);
-      collisionMap[y * MAP_W + x] = 1;
+  for (let x = 0; x < MAP_W; x += 1) {
+    for (let y = ONE_D_TILE_Y - 1; y <= ONE_D_TILE_Y + 1; y += 1) {
+      setTile(groundMap, x, y, 3);
+      overlayMap[y * MAP_W + x] = -1;
     }
   }
 
-  // 围栏围起农场区域
-  for (let x = 2; x <= 26; x += 1) {
-    overlayMap[3 * MAP_W + x] = 8;
-    collisionMap[3 * MAP_W + x] = 1;
-  }
-  // 灌木点缀
-  for (let i = 0; i < 30; i += 1) {
-    const x = irand(0, MAP_W - 1);
-    const y = irand(0, MAP_H - 1);
-    if (groundMap[y * MAP_W + x] === 0 && overlayMap[y * MAP_W + x] < 0) {
-      overlayMap[y * MAP_W + x] = 10;
-      collisionMap[y * MAP_W + x] = 1;
+  // 站点平台：农舍、田地、商店、出货箱、池塘、矿洞。
+  [5, 13, 24, 31, 43, 54].forEach((cx) => {
+    for (let x = cx - 2; x <= cx + 2; x += 1) {
+      setTile(groundMap, x, ONE_D_TILE_Y - 2, 11);
+      setTile(groundMap, x, ONE_D_TILE_Y + 2, 11);
+      overlayMap[(ONE_D_TILE_Y - 2) * MAP_W + x] = -1;
+      overlayMap[(ONE_D_TILE_Y + 2) * MAP_W + x] = -1;
     }
+  });
+
+  // 只在路线外放少量灌木，不设置碰撞，保持 1D 移动干净。
+  for (let i = 0; i < 24; i += 1) {
+    const x = (i * 11 + 7) % MAP_W;
+    const y = i % 2 === 0 ? ONE_D_TILE_Y - 5 - (i % 3) : ONE_D_TILE_Y + 5 + (i % 3);
+    if (y >= 0 && y < MAP_H && overlayMap[y * MAP_W + x] < 0) overlayMap[y * MAP_W + x] = 10;
   }
 }
 
@@ -807,11 +800,11 @@ function buildWorldBackdrop() {
 
 // ---------- 建筑实体 ----------
 const buildingDefs = [
-  { id: "home",       name: "玩家小屋", sprite: 0, x: 8 * TILE,   y: 8 * TILE,  w: 64, h: 56 },
-  { id: "market",     name: "集市小站", sprite: 1, x: 32 * TILE,  y: 6 * TILE,  w: 64, h: 56 },
-  { id: "greenhouse", name: "星光温室", sprite: 2, x: 44 * TILE,  y: 6 * TILE,  w: 64, h: 60 },
-  { id: "mill",       name: "风车仓库", sprite: 3, x: 22 * TILE,  y: 30 * TILE, w: 32, h: 56 },
-  { id: "pond",       name: "月亮池塘", sprite: 4, x: 44 * TILE,  y: 27 * TILE, w: 64, h: 32 },
+  { id: "home",       name: "农舍", sprite: 0, x: 3 * TILE,   y: ONE_D_Y - 72, w: 64, h: 56 },
+  { id: "market",     name: "种子店", sprite: 1, x: 22 * TILE, y: ONE_D_Y - 72, w: 64, h: 56 },
+  { id: "bin",        name: "出货箱", sprite: 3, x: 30 * TILE, y: ONE_D_Y - 56, w: 32, h: 40 },
+  { id: "pond",       name: "池塘", sprite: 4, x: 41 * TILE, y: ONE_D_Y + 22, w: 64, h: 32 },
+  { id: "mine",       name: "矿洞", sprite: 2, x: 52 * TILE, y: ONE_D_Y - 72, w: 64, h: 56 },
 ];
 
 function applyBuildingCollisions() {
@@ -840,16 +833,17 @@ const crops = [
 const cropById = Object.fromEntries(crops.map((c) => [c.id, c]));
 const seasons = ["春", "夏", "秋", "冬"];
 const npcs = [
-  { id: "lin", name: "林妮", role: "种子店主", x: 15 * TILE, y: 12 * TILE, color: "#ffd166", lines: ["今天的种子很新鲜。", "水分会让作物快很多。"] },
-  { id: "bo", name: "柏叔", role: "矿工", x: 36 * TILE, y: 11 * TILE, color: "#9aa3ad", lines: ["矿洞里有石材和旧硬币。", "体力不够就别硬撑。"] },
-  { id: "mira", name: "米拉", role: "钓手", x: 47 * TILE, y: 29 * TILE, color: "#6cd0ff", lines: ["池塘早晨更容易上鱼。", "钓到的鱼可以直接卖。"] },
+  { id: "lin", name: "林妮", role: "种子店主", x: 24 * TILE, y: ONE_D_Y, color: "#ffd166", lines: ["今天的种子很新鲜。", "水分会让作物快很多。"] },
+  { id: "mira", name: "米拉", role: "钓手", x: 43 * TILE, y: ONE_D_Y, color: "#6cd0ff", lines: ["池塘早晨更容易上鱼。", "钓到的鱼可以直接卖。"] },
+  { id: "bo", name: "柏叔", role: "矿工", x: 54 * TILE, y: ONE_D_Y, color: "#9aa3ad", lines: ["矿洞里有石材和旧硬币。", "体力不够就别硬撑。"] },
 ];
 const zones = [
-  { id: "shop", name: "种子店", type: "shop", x: 14 * TILE, y: 12 * TILE, r: 34 },
-  { id: "pond", name: "池塘", type: "fish", x: 48 * TILE, y: 30 * TILE, r: 60 },
-  { id: "mine", name: "旧矿洞", type: "mine", x: 36 * TILE, y: 8 * TILE, r: 42 },
-  { id: "home", name: "农舍", type: "home", x: 8 * TILE, y: 12 * TILE, r: 42 },
-  { id: "bin", name: "出货箱", type: "shipping", x: 11 * TILE, y: 14 * TILE, r: 30 },
+  { id: "home", name: "农舍", type: "home", x: 5 * TILE, y: ONE_D_Y, r: 36 },
+  { id: "field", name: "田地", type: "field", x: 14 * TILE, y: ONE_D_Y, r: 80 },
+  { id: "shop", name: "种子店", type: "shop", x: 24 * TILE, y: ONE_D_Y, r: 44 },
+  { id: "bin", name: "出货箱", type: "shipping", x: 31 * TILE, y: ONE_D_Y, r: 34 },
+  { id: "pond", name: "池塘", type: "fish", x: 43 * TILE, y: ONE_D_Y, r: 48 },
+  { id: "mine", name: "旧矿洞", type: "mine", x: 54 * TILE, y: ONE_D_Y, r: 44 },
 ];
 const questDefs = [
   { id: "firstHarvest", title: "第一份收成", text: "收获任意 3 个作物", target: 3, reward: 80 },
@@ -860,32 +854,29 @@ const questDefs = [
 // ---------- 田地 ----------
 function createPlots() {
   const plots = [];
-  // 农场区域 4 行 × 8 列，每块占 1 瓦
-  for (let row = 0; row < 4; row += 1) {
-    for (let col = 0; col < 8; col += 1) {
-      plots.push({
-        id: `plot-${plots.length}`,
-        tx: 6 + col,
-        ty: 14 + row,
-        locked: plots.length >= 16,
-        crop: null,
-        plantedAt: 0,
-        wateredAt: 0,
-        moisture: 0,
-        fertility: 0.85 + (plots.length * 7 % 30) / 100,
-        harvests: 0,
-      });
-    }
+  for (let col = 0; col < 24; col += 1) {
+    plots.push({
+      id: `plot-${plots.length}`,
+      tx: 7 + col,
+      ty: ONE_D_TILE_Y,
+      locked: plots.length >= 12,
+      crop: null,
+      plantedAt: 0,
+      wateredAt: 0,
+      moisture: 0,
+      fertility: 0.85 + (plots.length * 7 % 30) / 100,
+      harvests: 0,
+    });
   }
   return plots;
 }
 
 function createForageNodes() {
   return [
-    { id: "berry-1", item: "wildBerry", name: "野莓", x: 6 * TILE, y: 28 * TILE, ready: true, respawnAt: 0 },
-    { id: "berry-2", item: "wildBerry", name: "野莓", x: 17 * TILE, y: 30 * TILE, ready: true, respawnAt: 0 },
-    { id: "wood-1", item: "wood", name: "树枝", x: 4 * TILE, y: 18 * TILE, ready: true, respawnAt: 0 },
-    { id: "wood-2", item: "wood", name: "树枝", x: 22 * TILE, y: 33 * TILE, ready: true, respawnAt: 0 },
+    { id: "berry-1", item: "wildBerry", name: "野莓", x: 18 * TILE, y: ONE_D_Y, ready: true, respawnAt: 0 },
+    { id: "berry-2", item: "wildBerry", name: "野莓", x: 38 * TILE, y: ONE_D_Y, ready: true, respawnAt: 0 },
+    { id: "wood-1", item: "wood", name: "树枝", x: 10 * TILE, y: ONE_D_Y, ready: true, respawnAt: 0 },
+    { id: "wood-2", item: "wood", name: "树枝", x: 50 * TILE, y: ONE_D_Y, ready: true, respawnAt: 0 },
   ];
 }
 
@@ -942,7 +933,7 @@ function createInitialState() {
       id: getClientId(),
       name: "菜园主",
       x: 14 * TILE,
-      y: 22 * TILE,
+      y: ONE_D_Y,
       vx: 0, vy: 0,
       facing: "down",
       anim: { state: "idle", frame: 0, t: 0 },
@@ -988,7 +979,7 @@ function normalizeState(data) {
     forage: normalizeForage(data.forage, base.forage),
     energy: Number.isFinite(data.energy) ? data.energy : (data.water ?? base.energy),
     maxEnergy: data.maxEnergy || base.maxEnergy,
-    player: { ...base.player, ...(data.player || {}), id: getClientId(), lastSeen: now(), anim: base.player.anim },
+    player: { ...base.player, ...(data.player || {}), y: ONE_D_Y, id: getClientId(), lastSeen: now(), anim: base.player.anim },
     visitors: data.visitors || {},
     chat: Array.isArray(data.chat) ? data.chat.slice(-60) : [],
     plots: normalizePlots(data.plots, base.plots),
@@ -997,52 +988,51 @@ function normalizeState(data) {
 
 function normalizePlots(savedPlots, basePlots) {
   const saved = new Map((savedPlots || []).map((p) => [p.id, p]));
-  return basePlots.map((b, i) => ({ ...b, ...(saved.get(b.id) || savedPlots?.[i] || {}) }));
+  return basePlots.map((b, i) => {
+    const old = saved.get(b.id) || savedPlots?.[i] || {};
+    return { ...b, ...old, tx: b.tx, ty: b.ty, locked: old.locked ?? b.locked };
+  });
 }
 
 function normalizeForage(savedForage, baseForage) {
   const saved = new Map((savedForage || []).map((p) => [p.id, p]));
-  return baseForage.map((b) => ({ ...b, ...(saved.get(b.id) || {}) }));
+  return baseForage.map((b) => {
+    const old = saved.get(b.id) || {};
+    return { ...b, ...old, x: b.x, y: b.y };
+  });
 }
 
 // ---------- 玩家 / 物理 ----------
 function update(dt) {
   const player = game.player;
   let dx = joystickVector.x || ((input.right ? 1 : 0) - (input.left ? 1 : 0));
-  let dy = joystickVector.y || ((input.down ? 1 : 0) - (input.up ? 1 : 0));
-  const manualMove = dx !== 0 || dy !== 0;
+  let dy = 0;
+  const manualMove = dx !== 0;
 
   if (manualMove) {
     moveTarget = null;
   } else if (moveTarget) {
     const tx = moveTarget.x - player.x;
-    const ty = moveTarget.y - player.y;
-    const dist = Math.hypot(tx, ty);
+    const dist = Math.abs(tx);
     if (dist < 3) {
       moveTarget = null;
       dx = 0;
       dy = 0;
     } else {
-      dx = tx / dist;
-      dy = ty / dist;
+      dx = Math.sign(tx);
+      dy = 0;
     }
   }
 
-  const len = Math.hypot(dx, dy) || 1;
-  dx /= len; dy /= len;
+  dx = clamp(dx, -1, 1);
   player.vx = dx * PLAYER_SPEED;
-  player.vy = dy * PLAYER_SPEED;
+  player.vy = 0;
 
   // facing
-  if (Math.abs(dx) > Math.abs(dy)) {
-    if (dx > 0) player.facing = "right";
-    else if (dx < 0) player.facing = "left";
-  } else {
-    if (dy > 0) player.facing = "down";
-    else if (dy < 0) player.facing = "up";
-  }
+  if (dx > 0) player.facing = "right";
+  else if (dx < 0) player.facing = "left";
 
-  const moving = (dx !== 0 || dy !== 0);
+  const moving = dx !== 0;
   player.anim.state = moving ? "walk" : "idle";
   player.anim.t += dt;
   if (player.anim.t > 0.14) {
@@ -1051,13 +1041,8 @@ function update(dt) {
   }
   if (!moving) player.anim.frame = 0;
 
-  // AABB 碰撞解算
-  moveWithCollision(player, player.vx * dt, 0);
-  moveWithCollision(player, 0, player.vy * dt);
-
-  // 边界
-  player.x = clamp(player.x, 0, WORLD_W - 12);
-  player.y = clamp(player.y, 0, WORLD_H - 16);
+  player.x = clamp(player.x + player.vx * dt, TILE, WORLD_W - TILE);
+  player.y = ONE_D_Y;
   player.lastSeen = now();
 
   // 时间与农田状态
@@ -1453,7 +1438,7 @@ function render() {
 
   camera = {
     x: clamp(Math.floor(game.player.x - VIEW_W / 2), 0, WORLD_W - VIEW_W),
-    y: clamp(Math.floor(game.player.y - VIEW_H / 2 - 8), 0, WORLD_H - VIEW_H),
+    y: clamp(Math.floor(ONE_D_Y - VIEW_H / 2 + 34), 0, WORLD_H - VIEW_H),
   };
 
   drawTiles(camera);
@@ -2052,10 +2037,9 @@ function setJoystickVector(x, y) {
 function screenToWorld(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   const sx = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
-  const sy = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
   return {
     x: clamp(camera.x + sx * VIEW_W, 0, WORLD_W - 1),
-    y: clamp(camera.y + sy * VIEW_H, 0, WORLD_H - 1),
+    y: ONE_D_Y,
   };
 }
 
@@ -2073,14 +2057,14 @@ function handleMapPointer(event) {
   const plot = plotAtWorld(world.x, world.y);
   if (plot) {
     selectedPlotId = plot.id;
-    moveTarget = { x: plot.tx * TILE + TILE / 2, y: plot.ty * TILE + TILE + 10, plotId: plot.id };
+    moveTarget = { x: plot.tx * TILE + TILE / 2, y: ONE_D_Y, plotId: plot.id };
     if (plot.locked) showToast("这块地还没开垦，靠近后点“开垦”");
     else if (!plot.crop) showToast("正在前往空地，靠近后可播种");
     else if (getCropProgress(plot) >= 1) showToast("正在前往成熟作物，靠近后可收获");
     else showToast("正在前往作物，靠近后可浇水");
   } else {
     selectedPlotId = null;
-    moveTarget = { x: world.x, y: world.y };
+    moveTarget = { x: world.x, y: ONE_D_Y };
   }
   Sfx.play("ui");
 }
