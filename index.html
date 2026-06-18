@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#13251d" />
     <title>云上菜园 · 横板联机种菜</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=6" />
-    <link rel="stylesheet" href="./src/styles.css?v=6" />
+    <link rel="manifest" href="./manifest.webmanifest?v=8" />
+    <link rel="stylesheet" href="./src/styles.css?v=8" />
   </head>
   <body>
     <main id="app">
@@ -74,8 +74,9 @@
             <button type="submit">发送</button>
           </form>
         </aside>
-        <div class="crop-bar" id="cropBar"></div>
-        <div class="controls">
+        <button id="toolToggle" class="tool-toggle" aria-expanded="false">工具</button>
+        <div class="crop-bar collapsed" id="cropBar"></div>
+        <div class="controls collapsed" id="controlsPanel">
           <div class="move-pad">
             <button id="upBtn" class="up" aria-label="向上">⌃</button>
             <button id="leftBtn" class="left" aria-label="向左">‹</button>
@@ -94,6 +95,6 @@
 
       <section id="rotateTip" class="rotate-tip" aria-hidden="true"></section>
     </main>
-    <script type="module" src="./src/game.js?v=6"></script>
+    <script type="module" src="./src/game.js?v=8"></script>
   </body>
 </html>

@@ -119,25 +119,13 @@ function paintPixels(target, ox, oy, lines, palette) {
 
 // ---------- 程序化生成像素美术 ----------
 const SPRITES = {};
-const EXT = {
-  kenneyFarm: loadExternalImage("./assets/vendor/kenney-farm-expansion-tilemap.png"),
-  simpleFarm: loadExternalImage("./assets/vendor/opengameart-simple-farm-tiles.png"),
-};
-
-function loadExternalImage(src) {
-  const img = new Image();
-  const asset = { ready: false, image: img };
-  img.onload = () => { asset.ready = true; };
-  img.onerror = () => { asset.ready = false; };
-  img.src = src;
-  return asset;
-}
 
 function buildAssets() {
   buildTileSet();
   buildPlayer();
   buildCrops();
   buildBuildings();
+  buildProps();
   buildUI();
 }
 
@@ -565,6 +553,101 @@ function buildBuildings() {
     ], { W: PAL.stone3, a: PAL.waterMid, b: PAL.waterDark, B: PAL.waterLight });
 
   SPRITES.buildings = c.c;
+}
+
+// 场景小物件：桶、箱子、告示牌、花丛、稻草堆、灯笼，每个 16×16
+function buildProps() {
+  const c = makeCanvas(16 * 8, 16);
+  const x = c.x;
+  const P = {
+    W: PAL.wood1, w: PAL.wood2, d: PAL.wood3,
+    S: PAL.stone1, s: PAL.stone2,
+    G: PAL.grass4, g: PAL.grass3,
+    Y: PAL.uiGold, y: "#b8852a",
+    R: PAL.roofRed, r: PAL.roofRedDark,
+    F: PAL.flower1, f: PAL.flower2,
+    B: PAL.waterMid,
+  };
+
+  // 0 木桶
+  paintPixels(x, 0, 3, [
+    "    dddddd      ",
+    "   dWWWWWWd     ",
+    "   WwWWWWwW     ",
+    "   WwWWWWwW     ",
+    "   WwWWWWwW     ",
+    "   dWWWWWWd     ",
+    "    dddddd      ",
+  ], P);
+  // 1 木箱
+  paintPixels(x, 16, 4, [
+    "  dddddddddddd  ",
+    "  dWWWWWWWWWWd  ",
+    "  dWddWWddWWd  ",
+    "  dWWWddWWWWd  ",
+    "  dWWddWWddWd  ",
+    "  dWWWWWWWWWd  ",
+    "  ddddddddddd  ",
+  ], P);
+  // 2 告示牌
+  paintPixels(x, 32, 2, [
+    "    WWWWWWWW    ",
+    "   WYYYYYYYW    ",
+    "   WYYddYYYW    ",
+    "   WYYYYYYYW    ",
+    "    WWWWWWWW    ",
+    "       d        ",
+    "       d        ",
+    "       d        ",
+    "      ddd       ",
+  ], P);
+  // 3 花丛
+  paintPixels(x, 48, 5, [
+    "   gGg  gGg     ",
+    "  gFgGgfGgG     ",
+    "  GgGgGgGgG     ",
+    "   gGgffGg      ",
+    "    gggg        ",
+  ], P);
+  // 4 稻草堆
+  paintPixels(x, 64, 5, [
+    "     YYYY       ",
+    "   YYYYYYYY     ",
+    "  YYYYyyYYYY    ",
+    "  YYYyyyyYYY    ",
+    "   YYYYYYYY     ",
+    "     yyyy       ",
+  ], P);
+  // 5 路灯/灯笼
+  paintPixels(x, 80, 1, [
+    "      d         ",
+    "     ddd        ",
+    "    dYYYd       ",
+    "    dYfYd       ",
+    "     ddd        ",
+    "      d         ",
+    "      d         ",
+    "      d         ",
+    "     ddd        ",
+  ], P);
+  // 6 小石堆
+  paintPixels(x, 96, 7, [
+    "    ssSSs       ",
+    "   sSSSSSs      ",
+    "  sSSssSSs      ",
+    "   sSSSSs       ",
+  ], P);
+  // 7 水边芦苇
+  paintPixels(x, 112, 2, [
+    "   g  g g       ",
+    "   g  g g       ",
+    "  gG  gGg       ",
+    "  gGg gGg       ",
+    "   gGGGG        ",
+    "   BBBBB        ",
+  ], P);
+
+  SPRITES.props = c.c;
 }
 
 // UI 图标：32×32 each, 4 个
@@ -1023,7 +1106,7 @@ function render() {
 
   drawTiles(cam);
   drawBuildings(cam);
-  drawExternalProps(cam);
+  drawWorldProps(cam);
   drawPlots(cam);
   drawCrops(cam);
 
@@ -1033,7 +1116,6 @@ function render() {
 
   drawHover(cam);
   drawNight();
-  drawHudOverlay();
 
   // 缩放到屏幕
   const w = canvas.width, h = canvas.height;
@@ -1075,18 +1157,8 @@ function drawBuildings(cam) {
   buildingDefs.slice().sort((a, b) => (a.y + a.h) - (b.y + b.h)).forEach((b) => {
     const dx = Math.floor(b.x - cam.x);
     const dy = Math.floor(b.y - cam.y);
-    if (EXT.kenneyFarm.ready && b.id === "greenhouse") {
-      // Kenney CC0 农场扩展包中的温室，替换原先的粗糙程序图。
-      bx.drawImage(EXT.kenneyFarm.image, 62, 72, 83, 60, dx - 8, dy + 2, 92, 66);
-    } else if (EXT.kenneyFarm.ready && b.id === "market") {
-      // 用 Kenney 的南瓜箱/木桶拼出更像样的集市摊位。
-      bx.drawImage(EXT.kenneyFarm.image, 213, 0, 38, 52, dx + 8, dy + 8, 56, 68);
-      bx.drawImage(EXT.kenneyFarm.image, 91, 1, 16, 16, dx + 1, dy + 42, 20, 20);
-      bx.drawImage(EXT.kenneyFarm.image, 107, 1, 16, 16, dx + 47, dy + 43, 20, 20);
-    } else {
-      const sx = b.sprite * 64;
-      bx.drawImage(SPRITES.buildings, sx, 0, 64, 64, dx, dy, 64, 64);
-    }
+    const sx = b.sprite * 64;
+    bx.drawImage(SPRITES.buildings, sx, 0, 64, 64, dx, dy, 64, 64);
     // 名牌
     const lx = b.x - cam.x + b.w / 2;
     const ly = b.y - cam.y - 4;
@@ -1094,26 +1166,55 @@ function drawBuildings(cam) {
   });
 }
 
-function drawExternalProps(cam) {
-  if (!EXT.kenneyFarm.ready) return;
-  const img = EXT.kenneyFarm.image;
+function drawWorldProps(cam) {
+  const trees = [
+    { x: 3 * TILE, y: 8 * TILE, s: 1 }, { x: 6 * TILE, y: 6 * TILE, s: 1 },
+    { x: 18 * TILE, y: 7 * TILE, s: 1 }, { x: 58 * TILE, y: 5 * TILE, s: 1 },
+    { x: 57 * TILE, y: 35 * TILE, s: 1 }, { x: 4 * TILE, y: 34 * TILE, s: 1 },
+    { x: 16 * TILE, y: 33 * TILE, s: 1 }, { x: 39 * TILE, y: 33 * TILE, s: 1 },
+    { x: 52 * TILE, y: 11 * TILE, s: 1 }, { x: 59 * TILE, y: 18 * TILE, s: 1 },
+  ];
+  trees.forEach((tree) => drawTree(Math.floor(tree.x - cam.x), Math.floor(tree.y - cam.y)));
+
   const props = [
-    // 木桶、工具、植物、谷物，全部来自 Kenney CC0 atlas。
-    { sx: 110, sy: 0, sw: 16, sh: 16, x: 25 * TILE, y: 23 * TILE, w: 18, h: 18 },
-    { sx: 126, sy: 0, sw: 16, sh: 16, x: 26 * TILE, y: 23 * TILE, w: 18, h: 18 },
-    { sx: 146, sy: 22, sw: 16, sh: 16, x: 33 * TILE, y: 19 * TILE, w: 18, h: 18 },
-    { sx: 164, sy: 22, sw: 16, sh: 16, x: 35 * TILE, y: 19 * TILE, w: 18, h: 18 },
-    { sx: 181, sy: 22, sw: 16, sh: 16, x: 37 * TILE, y: 19 * TILE, w: 18, h: 18 },
-    { sx: 147, sy: 55, sw: 16, sh: 16, x: 30 * TILE, y: 25 * TILE, w: 18, h: 18 },
-    { sx: 164, sy: 55, sw: 16, sh: 16, x: 31 * TILE, y: 25 * TILE, w: 18, h: 18 },
-    { sx: 181, sy: 55, sw: 16, sh: 16, x: 32 * TILE, y: 25 * TILE, w: 18, h: 18 },
+    { i: 0, x: 25 * TILE, y: 23 * TILE }, { i: 1, x: 26 * TILE, y: 23 * TILE },
+    { i: 2, x: 14 * TILE, y: 20 * TILE }, { i: 3, x: 5 * TILE, y: 18 * TILE },
+    { i: 4, x: 35 * TILE, y: 20 * TILE }, { i: 5, x: 30 * TILE, y: 18 * TILE },
+    { i: 6, x: 18 * TILE, y: 26 * TILE }, { i: 7, x: 52 * TILE, y: 31 * TILE },
+    { i: 3, x: 43 * TILE, y: 17 * TILE }, { i: 4, x: 33 * TILE, y: 10 * TILE },
+    { i: 0, x: 9 * TILE, y: 13 * TILE }, { i: 1, x: 11 * TILE, y: 13 * TILE },
   ];
   props.forEach((p) => {
     const dx = Math.floor(p.x - cam.x);
     const dy = Math.floor(p.y - cam.y);
-    if (dx < -p.w || dx > VIEW_W || dy < -p.h || dy > VIEW_H) return;
-    bx.drawImage(img, p.sx, p.sy, p.sw, p.sh, dx, dy, p.w, p.h);
+    if (dx < -16 || dx > VIEW_W || dy < -16 || dy > VIEW_H) return;
+    bx.drawImage(SPRITES.props, p.i * 16, 0, 16, 16, dx, dy, 16, 16);
   });
+}
+
+function drawTree(x, y) {
+  if (x < -36 || x > VIEW_W + 12 || y < -44 || y > VIEW_H + 12) return;
+  bx.fillStyle = "rgba(0,0,0,0.28)";
+  bx.beginPath();
+  bx.ellipse(x + 16, y + 34, 13, 4, 0, 0, Math.PI * 2);
+  bx.fill();
+  // 树干
+  bx.fillStyle = PAL.wood3;
+  bx.fillRect(x + 13, y + 22, 6, 14);
+  bx.fillStyle = PAL.wood1;
+  bx.fillRect(x + 15, y + 22, 2, 12);
+  // 像素树冠
+  bx.fillStyle = PAL.grass3;
+  bx.fillRect(x + 7, y + 8, 18, 16);
+  bx.fillRect(x + 4, y + 14, 24, 12);
+  bx.fillRect(x + 10, y + 2, 12, 10);
+  bx.fillStyle = PAL.grass2;
+  bx.fillRect(x + 9, y + 7, 14, 15);
+  bx.fillRect(x + 6, y + 16, 9, 8);
+  bx.fillStyle = PAL.grass4;
+  bx.fillRect(x + 13, y + 5, 5, 5);
+  bx.fillRect(x + 19, y + 14, 5, 5);
+  bx.fillRect(x + 8, y + 18, 4, 4);
 }
 
 function drawLabel(text, cx, cy) {
@@ -1555,6 +1656,15 @@ function bindEvents() {
   $("#waterBtn").addEventListener("click", water);
   $("#harvestBtn").addEventListener("click", harvest);
   $("#shopBtn").addEventListener("click", expandFarm);
+  $("#toolToggle").addEventListener("click", () => {
+    const controls = $("#controlsPanel");
+    const cropBar = $("#cropBar");
+    const open = controls.classList.toggle("collapsed") === false;
+    cropBar.classList.toggle("collapsed", !open);
+    $("#toolToggle").classList.toggle("open", open);
+    $("#toolToggle").setAttribute("aria-expanded", String(open));
+    Sfx.play("ui");
+  });
   $("#syncNow").addEventListener("click", () => pushToGithub(false));
   $("#chatToggle").addEventListener("click", () => {
     ui.chatPanel.classList.toggle("hidden");

@@ -1,13 +1,11 @@
-const CACHE_NAME = "cloud-farm-v7";
+const CACHE_NAME = "cloud-farm-v9";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=6",
-  "./src/styles.css?v=6",
-  "./src/game.js?v=6",
+  "./manifest.webmanifest?v=8",
+  "./src/styles.css?v=8",
+  "./src/game.js?v=8",
   "./assets/icon.svg",
-  "./assets/vendor/kenney-farm-expansion-tilemap.png",
-  "./assets/vendor/opengameart-simple-farm-tiles.png",
   "./assets/vendor/ASSET_CREDITS.md",
   "./assets/vendor/KENNEY_CC0_LICENSE.txt",
 ];
