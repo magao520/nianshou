@@ -46,10 +46,10 @@ button {
 .screen,
 .game-shell {
   position: fixed;
-  inset: 0;
 }
 
 .screen {
+  inset: 0;
   display: none;
   place-items: center;
   padding: 20px;
@@ -220,12 +220,19 @@ button:active {
 
 .game-shell {
   display: block;
+  width: min(100vw, calc(100vh * 9 / 16));
+  height: min(100vh, calc(100vw * 16 / 9));
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
   background: #102017;
+  box-shadow: 0 0 0 999px #07120f;
 }
 
 .game-shell::after {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
   background:
@@ -244,7 +251,7 @@ canvas {
 }
 
 .hud {
-  position: fixed;
+  position: absolute;
   z-index: 5;
   pointer-events: none;
 }
@@ -258,10 +265,10 @@ canvas {
 }
 
 .stat {
-  min-width: 86px;
+  min-width: 62px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 18px;
-  padding: 8px 12px;
+  border-radius: 14px;
+  padding: 6px 8px;
   background: var(--glass);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
   backdrop-filter: blur(12px);
@@ -276,11 +283,11 @@ canvas {
 
 .stat strong {
   display: block;
-  font-size: 18px;
+  font-size: 15px;
 }
 
 .sync {
-  top: max(70px, calc(env(safe-area-inset-top) + 64px));
+  top: max(58px, calc(env(safe-area-inset-top) + 54px));
   right: max(12px, env(safe-area-inset-right));
   display: flex;
   align-items: center;
@@ -293,8 +300,9 @@ canvas {
 }
 
 .mini {
-  padding: 8px 12px;
+  padding: 6px 9px;
   background: var(--gold);
+  font-size: 12px;
 }
 
 #syncStatus {
@@ -307,12 +315,12 @@ canvas {
 }
 
 .crop-bar {
-  position: fixed;
+  position: absolute;
   z-index: 12;
   left: 50%;
-  bottom: max(78px, calc(env(safe-area-inset-bottom) + 78px));
+  bottom: max(86px, calc(env(safe-area-inset-bottom) + 86px));
   display: flex;
-  gap: 8px;
+  gap: 5px;
   transform: translateX(-50%);
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
@@ -324,10 +332,10 @@ canvas {
 }
 
 .crop-choice {
-  min-width: 78px;
+  min-width: 58px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 18px;
-  padding: 7px 10px;
+  border-radius: 14px;
+  padding: 5px 6px;
   color: var(--cream);
   background: var(--glass);
   backdrop-filter: blur(12px);
@@ -341,8 +349,8 @@ canvas {
 }
 
 .crop-choice .ico {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   margin: 0 auto;
   border-radius: 12px;
   background-size: 82% 82%;
@@ -353,13 +361,13 @@ canvas {
 }
 
 .crop-choice span {
-  font-size: 19px;
+  font-size: 15px;
   line-height: 1;
 }
 
 .crop-choice strong {
   margin-top: 3px;
-  font-size: 12px;
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -367,6 +375,7 @@ canvas {
   margin-top: 2px;
   color: rgba(255, 243, 212, 0.72);
   font-weight: 800;
+  font-size: 10px;
 }
 
 .crop-choice.active {
@@ -379,40 +388,41 @@ canvas {
 }
 
 .controls {
-  position: fixed;
+  position: absolute;
   z-index: 12;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: max(10px, env(safe-area-inset-bottom));
   display: flex;
-  gap: 28px;
-  justify-content: center;
+  gap: 10px;
+  justify-content: space-between;
   align-items: end;
+  padding: 0 12px;
   pointer-events: none;
-  transform: translateX(-50%);
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .controls.collapsed {
   opacity: 0;
   pointer-events: none;
-  transform: translateX(-50%) translateY(18px);
+  transform: translateY(18px);
 }
 
 .tool-toggle {
-  position: fixed;
+  position: absolute;
   z-index: 20;
   left: 50%;
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: max(48px, calc(env(safe-area-inset-bottom) + 48px));
   transform: translateX(-50%);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 999px;
-  min-width: 96px;
-  padding: 13px 18px;
+  min-width: 70px;
+  padding: 8px 12px;
   color: #102017;
   background: linear-gradient(180deg, #fff3a7, #ffd166);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
   font-weight: 900;
-  font-size: 16px;
+  font-size: 13px;
   letter-spacing: 0.04em;
 }
 
@@ -420,62 +430,58 @@ canvas {
   background: linear-gradient(180deg, #a8ff78, #55d37b);
 }
 
-.move-pad,
+.joystick,
 .action-pad {
   display: flex;
-  gap: 10px;
+  gap: 5px;
   pointer-events: auto;
 }
 
-.move-pad {
+.joystick {
   position: relative;
-  width: 152px;
-  height: 118px;
-}
-
-.move-pad button {
-  position: absolute;
-  width: 54px;
-  height: 54px;
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  color: var(--cream);
-  background: var(--glass-strong);
-  font-size: 34px;
-  line-height: 1;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,.14), rgba(255,255,255,.04) 42%, transparent 43%),
+    rgba(8, 20, 15, 0.54);
+  box-shadow: 0 10px 26px rgba(0,0,0,.24);
+  backdrop-filter: blur(10px);
+  touch-action: none;
 }
 
-.move-pad .up {
-  left: 49px;
-  top: 0;
+.joystick-ring {
+  position: absolute;
+  inset: 16px;
+  border: 1px dashed rgba(255, 243, 212, 0.28);
+  border-radius: 50%;
 }
 
-.move-pad .left {
-  left: 0;
-  top: 52px;
-}
-
-.move-pad .right {
-  right: 0;
-  top: 52px;
-}
-
-.move-pad .down {
-  left: 49px;
-  bottom: 0;
+.joystick-stick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(180deg, #fff3a7, #55d37b);
+  box-shadow: 0 6px 16px rgba(0,0,0,.34);
 }
 
 .action-pad button {
-  min-width: 68px;
-  padding: 10px 12px;
+  min-width: 48px;
+  padding: 7px 8px;
   background: linear-gradient(180deg, #f7fff0, #bdf9c9);
   display: grid;
   gap: 2px;
   place-items: center;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .action-pad button span {
-  font-size: 18px;
+  font-size: 15px;
   line-height: 1;
 }
 
@@ -492,7 +498,7 @@ canvas {
 }
 
 .toast {
-  position: fixed;
+  position: absolute;
   z-index: 15;
   left: 50%;
   top: 18%;
@@ -507,7 +513,7 @@ canvas {
 }
 
 .chat-panel {
-  position: fixed;
+  position: absolute;
   z-index: 12;
   right: max(14px, env(safe-area-inset-right));
   top: max(116px, calc(env(safe-area-inset-top) + 106px));

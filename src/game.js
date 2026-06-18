@@ -1,7 +1,7 @@
 /* ==============================================================
    云上菜园 · 像素引擎 v5
    - 60FPS 固定步长游戏循环（accumulator）
-   - 像素相机 480×270 内部分辨率 → 整数倍缩放
+   - 竖屏像素相机，内部比例跟随 9:16 手游画框
    - 程序化生成所有像素美术（瓦片、角色、作物、建筑、UI）
    - 帧动画状态机：idle / walk / action
    - AABB 物理与碰撞
@@ -44,9 +44,9 @@ const PAL = {
 };
 
 // ---------- 配置 ----------
-const BASE_VIEW_H = 270;     // 内部像素高度，宽度按真实屏幕比例动态计算
-let VIEW_W = 480;
-let VIEW_H = BASE_VIEW_H;
+const BASE_VIEW_W = 270;     // 竖屏内部宽度，高度按真实画框比例动态计算
+let VIEW_W = BASE_VIEW_W;
+let VIEW_H = 480;
 const TILE = 16;             // 单瓦片尺寸
 const MAP_W = 64;            // 瓦片地图宽
 const MAP_H = 40;            // 瓦片地图高
@@ -91,6 +91,10 @@ buf.height = VIEW_H;
 const bx = buf.getContext("2d");
 bx.imageSmoothingEnabled = false;
 let worldBackdrop = null;
+const artBackground = new Image();
+let artBackgroundReady = false;
+artBackground.onload = () => { artBackgroundReady = true; };
+artBackground.src = "./assets/art/portrait_farm_background.jpg";
 
 // ---------- 像素工具 ----------
 function makeCanvas(w, h) {
@@ -923,6 +927,7 @@ let syncTimer = 0;
 let toastTimer = 0;
 let lastChatSignature = "";
 let input = { left: false, right: false, up: false, down: false, action: false };
+let joystickVector = { x: 0, y: 0 };
 let game = createInitialState();
 let actionFlash = 0;
 let lastGamepadButtons = new Set();
@@ -998,8 +1003,8 @@ function normalizePlots(savedPlots, basePlots) {
 // ---------- 玩家 / 物理 ----------
 function update(dt) {
   const player = game.player;
-  let dx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-  let dy = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  let dx = joystickVector.x || ((input.right ? 1 : 0) - (input.left ? 1 : 0));
+  let dy = joystickVector.y || ((input.down ? 1 : 0) - (input.up ? 1 : 0));
   const manualMove = dx !== 0 || dy !== 0;
 
   if (manualMove) {
@@ -1242,11 +1247,20 @@ function render() {
 }
 
 function drawTiles(cam) {
+  if (artBackgroundReady) {
+    const sx = (cam.x / Math.max(1, WORLD_W - VIEW_W)) * Math.max(0, artBackground.width - VIEW_W);
+    const sy = (cam.y / Math.max(1, WORLD_H - VIEW_H)) * Math.max(0, artBackground.height - VIEW_H);
+    bx.imageSmoothingEnabled = true;
+    bx.drawImage(artBackground, sx, sy, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    bx.imageSmoothingEnabled = false;
+    return;
+  }
   if (!worldBackdrop) buildWorldBackdrop();
   bx.drawImage(worldBackdrop, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
 }
 
 function drawBuildings(cam) {
+  if (artBackgroundReady) return;
   buildingDefs.slice().sort((a, b) => (a.y + a.h) - (b.y + b.h)).forEach((b) => {
     const dx = Math.floor(b.x - cam.x);
     const dy = Math.floor(b.y - cam.y);
@@ -1260,6 +1274,7 @@ function drawBuildings(cam) {
 }
 
 function drawWorldProps(cam) {
+  if (artBackgroundReady) return;
   const trees = [
     { x: 3 * TILE, y: 8 * TILE, s: 1 }, { x: 6 * TILE, y: 6 * TILE, s: 1 },
     { x: 18 * TILE, y: 7 * TILE, s: 1 }, { x: 58 * TILE, y: 5 * TILE, s: 1 },
@@ -1326,6 +1341,13 @@ function drawPlots(cam) {
     const px = p.tx * TILE - cam.x;
     const py = p.ty * TILE - cam.y;
     if (px < -16 || px > VIEW_W || py < -16 || py > VIEW_H) return;
+    if (artBackgroundReady) {
+      if (p.id !== selectedPlotId && !p.crop) return;
+      if (!p.crop) {
+        drawPlotOutline(px, py, p.locked);
+        return;
+      }
+    }
     if (p.locked) {
       drawPlotPatch(px, py, "rgba(63,43,24,.72)", "rgba(255,255,255,.28)", true);
       return;
@@ -1338,6 +1360,16 @@ function drawPlots(cam) {
       bx.strokeRect(px - 2, py - 2, TILE + 4, TILE + 4);
     }
   });
+}
+
+function drawPlotOutline(px, py, dashed = false) {
+  bx.fillStyle = "rgba(255, 243, 167, 0.14)";
+  bx.fillRect(px - 2, py - 2, TILE + 4, TILE + 4);
+  bx.strokeStyle = dashed ? "rgba(255,255,255,.52)" : "#fff3a7";
+  bx.lineWidth = 2;
+  if (dashed) bx.setLineDash([3, 2]);
+  bx.strokeRect(px - 2, py - 2, TILE + 4, TILE + 4);
+  bx.setLineDash([]);
 }
 
 function drawPlotPatch(px, py, fill, edge, dashed) {
@@ -1729,6 +1761,8 @@ function startGame() {
   }
   startScreen.classList.remove("active");
   gameScreen.classList.remove("hidden");
+  resizeCanvas();
+  requestAnimationFrame(resizeCanvas);
   ui.sync.textContent = backendReady() ? "GitHub 后端已就绪" : "本地模式";
   addLog(`${name} 进入了村庄`);
   renderCropBar();
@@ -1739,6 +1773,16 @@ function startGame() {
 
 // ---------- 输入 ----------
 function setMove(direction, pressed) { input[direction] = pressed; }
+
+function setJoystickVector(x, y) {
+  const len = Math.hypot(x, y);
+  if (len < 0.12) {
+    joystickVector = { x: 0, y: 0 };
+    return;
+  }
+  const limited = Math.min(1, len);
+  joystickVector = { x: (x / len) * limited, y: (y / len) * limited };
+}
 
 function screenToWorld(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
@@ -1787,6 +1831,44 @@ function bindHold(button, direction) {
   el.addEventListener("pointerleave", up);
 }
 
+function bindJoystick() {
+  const base = $("#joystick");
+  const stick = $("#joystickStick");
+  if (!base || !stick) return;
+  let active = false;
+  const reset = () => {
+    active = false;
+    setJoystickVector(0, 0);
+    stick.style.transform = "translate(-50%, -50%)";
+  };
+  const move = (event) => {
+    if (!active) return;
+    const rect = base.getBoundingClientRect();
+    const radius = rect.width / 2;
+    const cx = rect.left + radius;
+    const cy = rect.top + radius;
+    const rawX = event.clientX - cx;
+    const rawY = event.clientY - cy;
+    const dist = Math.hypot(rawX, rawY);
+    const max = radius * 0.52;
+    const scale = dist > max ? max / dist : 1;
+    const knobX = rawX * scale;
+    const knobY = rawY * scale;
+    stick.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+    setJoystickVector(rawX / max, rawY / max);
+  };
+  base.addEventListener("pointerdown", (event) => {
+    active = true;
+    base.setPointerCapture?.(event.pointerId);
+    Sfx.resume();
+    move(event);
+  });
+  base.addEventListener("pointermove", move);
+  base.addEventListener("pointerup", reset);
+  base.addEventListener("pointercancel", reset);
+  base.addEventListener("lostpointercapture", reset);
+}
+
 function resizeCanvas() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const rect = canvas.getBoundingClientRect();
@@ -1795,8 +1877,8 @@ function resizeCanvas() {
   canvas.width = Math.floor(cssW * dpr);
   canvas.height = Math.floor(cssH * dpr);
   const ratio = canvas.width / Math.max(1, canvas.height);
-  VIEW_H = BASE_VIEW_H;
-  VIEW_W = clamp(Math.round(VIEW_H * ratio), 360, 760);
+  VIEW_W = BASE_VIEW_W;
+  VIEW_H = clamp(Math.round(VIEW_W / Math.max(0.42, ratio)), 420, 560);
   if (buf.width !== VIEW_W || buf.height !== VIEW_H) {
     buf.width = VIEW_W;
     buf.height = VIEW_H;
@@ -1840,10 +1922,7 @@ function bindEvents() {
     sendChat(ui.chatInput.value);
     ui.chatInput.value = "";
   });
-  bindHold("#upBtn", "up");
-  bindHold("#leftBtn", "left");
-  bindHold("#rightBtn", "right");
-  bindHold("#downBtn", "down");
+  bindJoystick();
 
   window.addEventListener("keydown", (e) => {
     if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;

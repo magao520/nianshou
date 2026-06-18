@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#13251d" />
     <title>云上菜园 · 横板联机种菜</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=10" />
-    <link rel="stylesheet" href="./src/styles.css?v=10" />
+    <link rel="manifest" href="./manifest.webmanifest?v=11" />
+    <link rel="stylesheet" href="./src/styles.css?v=11" />
   </head>
   <body>
     <main id="app">
@@ -74,14 +74,12 @@
             <button type="submit">发送</button>
           </form>
         </aside>
-        <button id="toolToggle" class="tool-toggle" aria-expanded="false">操作</button>
-        <div class="crop-bar collapsed" id="cropBar"></div>
-        <div class="controls collapsed" id="controlsPanel">
-          <div class="move-pad">
-            <button id="upBtn" class="up" aria-label="向上">⌃</button>
-            <button id="leftBtn" class="left" aria-label="向左">‹</button>
-            <button id="rightBtn" class="right" aria-label="向右">›</button>
-            <button id="downBtn" class="down" aria-label="向下">⌄</button>
+        <button id="toolToggle" class="tool-toggle open" aria-expanded="true">工具</button>
+        <div class="crop-bar" id="cropBar"></div>
+        <div class="controls" id="controlsPanel">
+          <div class="joystick" id="joystick" aria-label="移动摇杆">
+            <div class="joystick-ring"></div>
+            <div class="joystick-stick" id="joystickStick"></div>
           </div>
           <div class="action-pad">
             <button id="plantBtn"><span>🌱</span>播种</button>
@@ -95,6 +93,6 @@
 
       <section id="rotateTip" class="rotate-tip" aria-hidden="true"></section>
     </main>
-    <script type="module" src="./src/game.js?v=10"></script>
+    <script type="module" src="./src/game.js?v=11"></script>
   </body>
 </html>
