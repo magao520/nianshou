@@ -1,4 +1,5 @@
 import * as THREE from "../assets/vendor/three.module.js";
+import { GLTFLoader } from "../assets/vendor/loaders/GLTFLoader.js";
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -30,6 +31,7 @@ const ui = {
 };
 
 const WORLD = 180;
+const SAVE_VERSION = 5;
 const clock = new THREE.Clock();
 let renderer;
 let scene;
@@ -41,6 +43,8 @@ let started = false;
 let fallback2D = false;
 let ctx2d = null;
 let fallbackWorld = null;
+let loader = null;
+const modelLibrary = {};
 let yaw = 0;
 let attackCooldown = 0;
 let saveTimer = 0;
@@ -51,6 +55,20 @@ const interactables = [];
 const dinos = [];
 const structures = [];
 const logs = [];
+const MODEL_URLS = {
+  tree: "../assets/models/kenney/survival/tree.glb",
+  treeTall: "../assets/models/kenney/survival/tree-tall.glb",
+  palm: "../assets/models/kenney/nature/tree_palmBend.glb",
+  rockA: "../assets/models/kenney/survival/rock-a.glb",
+  rockC: "../assets/models/kenney/survival/rock-c.glb",
+  bush: "../assets/models/kenney/nature/plant_bushSmall.glb",
+  grassLarge: "../assets/models/kenney/survival/grass-large.glb",
+  patchGrass: "../assets/models/kenney/survival/patch-grass-large.glb",
+  campfire: "../assets/models/kenney/survival/campfire-pit.glb",
+  tent: "../assets/models/kenney/survival/tent.glb",
+  floor: "../assets/models/kenney/survival/structure-floor.glb",
+  chest: "../assets/models/kenney/survival/chest.glb",
+};
 
 const state = {
   name: "幸存者",
@@ -90,7 +108,7 @@ const material = {
   warning: new THREE.MeshBasicMaterial({ color: 0xff5f4a }),
 };
 
-function init() {
+async function init() {
   const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
   if (!gl) {
     initFallback2D();
@@ -120,6 +138,8 @@ function init() {
   sun.shadow.mapSize.set(1024, 1024);
   scene.add(sun);
 
+  loader = new GLTFLoader();
+  await loadModelAssets();
   buildIsland();
   player = createPlayer();
   player.position.set(0, 1.1, 10);
@@ -128,6 +148,38 @@ function init() {
   resizeCanvas();
   log("你在陌生荒岛醒来。先采集木头、石头和浆果。");
   log("靠近湖边可饮水，遇到迅猛龙请攻击或逃跑。");
+}
+
+async function loadModelAssets() {
+  const entries = Object.entries(MODEL_URLS);
+  await Promise.all(entries.map(async ([key, url]) => {
+    try {
+      const gltf = await loader.loadAsync(url);
+      modelLibrary[key] = gltf.scene;
+      gltf.scene.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
+    } catch (err) {
+      console.warn("模型加载失败，使用程序化降级：", key, err);
+    }
+  }));
+}
+
+function cloneModel(key, scale = 1) {
+  const base = modelLibrary[key];
+  if (!base) return null;
+  const clone = base.clone(true);
+  clone.scale.setScalar(scale);
+  clone.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
+  return clone;
 }
 
 function buildIsland() {
@@ -181,12 +233,35 @@ function spawnWorld() {
     const p = randomLandPoint();
     addBush(p.x, p.z);
   }
+  for (let i = 0; i < 38; i += 1) {
+    const p = randomLandPoint();
+    addSceneryGrass(p.x, p.z);
+  }
+  addStarterCamp();
   [
     { x: 18, z: -30, kind: "herb" },
     { x: -38, z: 32, kind: "herb" },
     { x: 45, z: 20, kind: "raptor" },
     { x: -52, z: -42, kind: "raptor" },
   ].forEach((d) => addDino(d.x, d.z, d.kind));
+}
+
+function addStarterCamp() {
+  const tent = cloneModel("tent", 1.35);
+  if (tent) {
+    tent.position.set(6, 0.05, 5);
+    tent.rotation.y = -0.7;
+    scene.add(tent);
+    structures.push(tent);
+  }
+  const chest = cloneModel("chest", 1.1);
+  if (chest) {
+    chest.position.set(9, 0.05, 6.8);
+    chest.rotation.y = 0.5;
+    scene.add(chest);
+    structures.push(chest);
+  }
+  addCampfire(3, 7);
 }
 
 function initFallback2D() {
@@ -239,6 +314,15 @@ function createPlayer() {
 }
 
 function addTree(x, z) {
+  const model = cloneModel(Math.random() < 0.25 ? "palm" : Math.random() < 0.55 ? "treeTall" : "tree", rand(1.25, 1.9));
+  if (model) {
+    model.position.set(x, 0, z);
+    model.rotation.y = rand(0, Math.PI * 2);
+    model.userData = { type: "tree", hp: 3, label: "树木", gives: { wood: 2, fiber: 1 } };
+    scene.add(model);
+    interactables.push(model);
+    return;
+  }
   const g = new THREE.Group();
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 3.2, 7), material.trunk);
   trunk.position.y = 1.6;
@@ -254,6 +338,15 @@ function addTree(x, z) {
 }
 
 function addRock(x, z) {
+  const model = cloneModel(Math.random() < 0.5 ? "rockA" : "rockC", rand(1.2, 2.0));
+  if (model) {
+    model.position.set(x, 0.02, z);
+    model.rotation.y = rand(0, Math.PI * 2);
+    model.userData = { type: "rock", hp: 3, label: "岩石", gives: { stone: 2 } };
+    scene.add(model);
+    interactables.push(model);
+    return;
+  }
   const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rand(0.7, 1.25), 0), material.rock);
   rock.scale.y = rand(0.55, 1.15);
   rock.position.set(x, 0.7, z);
@@ -265,6 +358,15 @@ function addRock(x, z) {
 }
 
 function addBush(x, z) {
+  const model = cloneModel("bush", rand(1.3, 2.0));
+  if (model) {
+    model.position.set(x, 0, z);
+    model.rotation.y = rand(0, Math.PI * 2);
+    model.userData = { type: "bush", hp: 1, label: "浆果丛", gives: { berries: 2, fiber: 1 } };
+    scene.add(model);
+    interactables.push(model);
+    return;
+  }
   const bush = new THREE.Mesh(new THREE.SphereGeometry(0.75, 10, 8), new THREE.MeshLambertMaterial({ color: 0x3f9b42 }));
   bush.scale.y = 0.55;
   bush.position.set(x, 0.45, z);
@@ -272,6 +374,14 @@ function addBush(x, z) {
   bush.userData = { type: "bush", hp: 1, label: "浆果丛", gives: { berries: 2, fiber: 1 } };
   scene.add(bush);
   interactables.push(bush);
+}
+
+function addSceneryGrass(x, z) {
+  const model = cloneModel(Math.random() < 0.45 ? "patchGrass" : "grassLarge", rand(0.9, 1.6));
+  if (!model) return;
+  model.position.set(x, 0.03, z);
+  model.rotation.y = rand(0, Math.PI * 2);
+  scene.add(model);
 }
 
 function addDino(x, z, kind) {
@@ -380,9 +490,9 @@ function updateDinos(dt) {
     const dToPlayer = dist2(d.position, p);
     let target = data.target;
     let speed = data.speed;
-    if (data.kind === "raptor" && dToPlayer < 34) {
+    if (d.kind === "raptor" && dToPlayer < 24) {
       target = p;
-      speed *= dToPlayer < 8 ? 1.15 : 1;
+      speed *= dToPlayer < 7 ? 1.05 : 1;
       if (dToPlayer < 2.4 && data.attackTimer <= 0) {
         data.attackTimer = 1.15;
         state.hp = clamp(state.hp - 11, 0, 100);
@@ -448,15 +558,15 @@ function updateFallback2D(dt) {
     const dx = player.position.x - d.x;
     const dz = player.position.z - d.z;
     const dd = Math.hypot(dx, dz);
-    const speed = d.kind === "raptor" && dd < 34 ? 13 : d.kind === "herb" ? 4 : 6;
+    const speed = d.kind === "raptor" && dd < 20 ? 6.5 : d.kind === "herb" ? 4 : 3.2;
     if (dd > 0.1) {
       const sign = d.kind === "herb" && dd < 9 ? -1 : 1;
       d.x += (dx / dd) * speed * dt * sign;
       d.z += (dz / dd) * speed * dt * sign;
     }
-    if (d.kind === "raptor" && dd < 3.5 && d.attack <= 0) {
+    if (d.kind === "raptor" && dd < 2.4 && d.attack <= 0) {
       d.attack = 1.2;
-      state.hp = clamp(state.hp - 9, 0, 100);
+      state.hp = clamp(state.hp - 6, 0, 100);
       flashDamage();
       log("迅猛龙扑咬了你。");
     }
@@ -681,6 +791,16 @@ function build() {
 }
 
 function addCampfire(x, z) {
+  const model = cloneModel("campfire", 1.6);
+  if (model) {
+    const light = new THREE.PointLight(0xff8a2a, 1.8, 16);
+    light.position.y = 1.3;
+    model.add(light);
+    model.position.set(x, 0.04, z);
+    scene.add(model);
+    structures.push(model);
+    return;
+  }
   const g = new THREE.Group();
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.25, 8), material.rock);
   base.position.y = 0.18;
@@ -695,6 +815,14 @@ function addCampfire(x, z) {
 }
 
 function addFoundation(x, z) {
+  const model = cloneModel("floor", 1.55);
+  if (model) {
+    model.position.set(x, 0.05, z);
+    model.rotation.y = Math.round(yaw / (Math.PI / 2)) * (Math.PI / 2);
+    scene.add(model);
+    structures.push(model);
+    return;
+  }
   const f = new THREE.Mesh(new THREE.BoxGeometry(4, 0.35, 4), new THREE.MeshLambertMaterial({ color: 0x8a5a2f }));
   f.position.set(x, 0.22, z);
   f.receiveShadow = true;
@@ -841,6 +969,7 @@ function updateHud() {
 
 function saveLocal() {
   localStorage.setItem("arkLikeSurvival3D", JSON.stringify({
+    version: SAVE_VERSION,
     state,
     logs: logs.slice(0, 12),
   }));
@@ -849,7 +978,7 @@ function saveLocal() {
 function loadLocal() {
   try {
     const raw = JSON.parse(localStorage.getItem("arkLikeSurvival3D") || "null");
-    if (!raw?.state) return;
+    if (!raw?.state || raw.version !== SAVE_VERSION || raw.state.hp < 35) return;
     Object.assign(state, raw.state);
     logs.splice(0, logs.length, ...(raw.logs || []));
   } catch {}
@@ -869,12 +998,18 @@ function resizeCanvas() {
   camera.updateProjectionMatrix();
 }
 
-function startGame() {
+async function startGame() {
   state.name = $("#playerName").value.trim() || "幸存者";
   startScreen.classList.remove("active");
   gameScreen.classList.remove("hidden");
-  if (!scene && !fallback2D) init();
+  showToast("正在加载 3D 素材...");
+  if (!scene && !fallback2D) await init();
   loadLocal();
+  if (state.hp < 70) {
+    state.hp = 100;
+    state.hunger = Math.max(state.hunger, 85);
+    state.thirst = Math.max(state.thirst, 85);
+  }
   started = true;
   resizeCanvas();
   requestAnimationFrame(resizeCanvas);
