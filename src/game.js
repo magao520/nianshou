@@ -44,8 +44,9 @@ const PAL = {
 };
 
 // ---------- 配置 ----------
-const VIEW_W = 480;          // 内部像素分辨率
-const VIEW_H = 270;
+const BASE_VIEW_H = 270;     // 内部像素高度，宽度按真实屏幕比例动态计算
+let VIEW_W = 480;
+let VIEW_H = BASE_VIEW_H;
 const TILE = 16;             // 单瓦片尺寸
 const MAP_W = 64;            // 瓦片地图宽
 const MAP_H = 40;            // 瓦片地图高
@@ -841,6 +842,8 @@ let input = { left: false, right: false, up: false, down: false, action: false }
 let game = createInitialState();
 let actionFlash = 0;
 let lastGamepadButtons = new Set();
+let camera = { x: 0, y: 0 };
+let moveTarget = null;
 
 function createInitialState() {
   return {
@@ -912,6 +915,24 @@ function update(dt) {
   const player = game.player;
   let dx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   let dy = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  const manualMove = dx !== 0 || dy !== 0;
+
+  if (manualMove) {
+    moveTarget = null;
+  } else if (moveTarget) {
+    const tx = moveTarget.x - player.x;
+    const ty = moveTarget.y - player.y;
+    const dist = Math.hypot(tx, ty);
+    if (dist < 3) {
+      moveTarget = null;
+      dx = 0;
+      dy = 0;
+    } else {
+      dx = tx / dist;
+      dy = ty / dist;
+    }
+  }
+
   const len = Math.hypot(dx, dy) || 1;
   dx /= len; dy /= len;
   player.vx = dx * PLAYER_SPEED;
@@ -1099,37 +1120,30 @@ function render() {
   bx.fillStyle = "#0e1b17";
   bx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  const cam = {
+  camera = {
     x: clamp(Math.floor(game.player.x - VIEW_W / 2), 0, WORLD_W - VIEW_W),
     y: clamp(Math.floor(game.player.y - VIEW_H / 2 - 8), 0, WORLD_H - VIEW_H),
   };
 
-  drawTiles(cam);
-  drawBuildings(cam);
-  drawWorldProps(cam);
-  drawPlots(cam);
-  drawCrops(cam);
+  drawTiles(camera);
+  drawBuildings(camera);
+  drawWorldProps(camera);
+  drawPlots(camera);
+  drawCrops(camera);
 
   // 排序绘制玩家
   const players = [game.player, ...Object.values(game.visitors || {}).filter((p) => p.id !== game.player.id && now() - p.lastSeen < 45000)];
-  players.sort((a, b) => a.y - b.y).forEach((p) => drawPlayer(p, cam, p.id === game.player.id));
+  players.sort((a, b) => a.y - b.y).forEach((p) => drawPlayer(p, camera, p.id === game.player.id));
 
-  drawHover(cam);
+  drawMoveTarget(camera);
+  drawHover(camera);
   drawNight();
 
-  // 缩放到屏幕
+  // 按真实屏幕比例完整铺满，不裁切、不黑边、不强行 16:9。
   const w = canvas.width, h = canvas.height;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, w, h);
-  // 铺满屏幕：之前用 contain 会在超宽/非 16:9 设备上形成“鞋垫子”黑边。
-  // 这里改为 cover，保持像素画面比例，同时填满整个横屏区域。
-  const scale = Math.max(w / VIEW_W, h / VIEW_H);
-  const sw = VIEW_W * scale;
-  const sh = VIEW_H * scale;
-  const ox = Math.floor((w - sw) / 2);
-  const oy = Math.floor((h - sh) / 2);
-  ctx.drawImage(buf, 0, 0, VIEW_W, VIEW_H, ox, oy, sw, sh);
-  drawMiniMap(cam);
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(buf, 0, 0, VIEW_W, VIEW_H, 0, 0, w, h);
+  drawMiniMap(camera);
   updateHud();
   renderChat();
 }
@@ -1306,6 +1320,18 @@ function drawHover(cam) {
     bx.fillStyle = `rgba(255, 255, 255, ${actionFlash})`;
     bx.fillRect(px, py, TILE, TILE);
   }
+}
+
+function drawMoveTarget(cam) {
+  if (!moveTarget) return;
+  const x = Math.floor(moveTarget.x - cam.x);
+  const y = Math.floor(moveTarget.y - cam.y);
+  const pulse = 1 + Math.sin(Date.now() / 120) * 0.25;
+  bx.strokeStyle = "#fff3a7";
+  bx.lineWidth = 1;
+  bx.strokeRect(x - 5 * pulse, y - 5 * pulse, 10 * pulse, 10 * pulse);
+  bx.fillStyle = "rgba(255, 209, 102, 0.85)";
+  bx.fillRect(x - 1, y - 1, 3, 3);
 }
 
 function drawNight() {
@@ -1622,6 +1648,40 @@ function startGame() {
 // ---------- 输入 ----------
 function setMove(direction, pressed) { input[direction] = pressed; }
 
+function screenToWorld(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+  const sy = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+  return {
+    x: clamp(camera.x + sx * VIEW_W, 0, WORLD_W - 1),
+    y: clamp(camera.y + sy * VIEW_H, 0, WORLD_H - 1),
+  };
+}
+
+function plotAtWorld(x, y) {
+  return game.plots.find((plot) => {
+    const px = plot.tx * TILE;
+    const py = plot.ty * TILE;
+    return x >= px && x <= px + TILE && y >= py && y <= py + TILE;
+  });
+}
+
+function handleMapPointer(event) {
+  if (gameScreen.classList.contains("hidden")) return;
+  const world = screenToWorld(event.clientX, event.clientY);
+  const plot = plotAtWorld(world.x, world.y);
+  if (plot) {
+    moveTarget = { x: plot.tx * TILE + TILE / 2, y: plot.ty * TILE + TILE + 8, plotId: plot.id };
+    if (plot.locked) showToast("这块地还没开垦，靠近后点“开垦”");
+    else if (!plot.crop) showToast("正在前往空地，靠近后可播种");
+    else if (getCropProgress(plot) >= 1) showToast("正在前往成熟作物，靠近后可收获");
+    else showToast("正在前往作物，靠近后可浇水");
+  } else {
+    moveTarget = { x: world.x, y: world.y };
+  }
+  Sfx.play("ui");
+}
+
 function bindHold(button, direction) {
   const el = $(button);
   if (!el) return;
@@ -1640,6 +1700,14 @@ function resizeCanvas() {
   const cssH = Math.max(1, Math.round(rect.height || window.innerHeight));
   canvas.width = Math.floor(cssW * dpr);
   canvas.height = Math.floor(cssH * dpr);
+  const ratio = canvas.width / Math.max(1, canvas.height);
+  VIEW_H = BASE_VIEW_H;
+  VIEW_W = clamp(Math.round(VIEW_H * ratio), 360, 760);
+  if (buf.width !== VIEW_W || buf.height !== VIEW_H) {
+    buf.width = VIEW_W;
+    buf.height = VIEW_H;
+    bx.imageSmoothingEnabled = false;
+  }
   ctx.imageSmoothingEnabled = false;
 }
 
@@ -1665,6 +1733,7 @@ function bindEvents() {
     $("#toolToggle").setAttribute("aria-expanded", String(open));
     Sfx.play("ui");
   });
+  canvas.addEventListener("pointerdown", handleMapPointer);
   $("#syncNow").addEventListener("click", () => pushToGithub(false));
   $("#chatToggle").addEventListener("click", () => {
     ui.chatPanel.classList.toggle("hidden");
