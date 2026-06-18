@@ -1,10 +1,10 @@
-const CACHE_NAME = "cloud-farm-v32";
+const CACHE_NAME = "cloud-farm-v34";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=32",
-  "./src/styles.css?v=32",
-  "./src/game.js?v=32",
+  "./manifest.webmanifest?v=34",
+  "./src/styles.css?v=34",
+  "./src/game.js?v=34",
   "./assets/icon.svg",
   "./assets/2d/kenney/particles/flame_06.png",
   "./assets/2d/kenney/particles/smoke_07.png",
@@ -13,6 +13,18 @@ const ASSETS = [
   "./assets/2d/kenney/particles/light_01.png",
   "./assets/2d/kenney/ui/panel_beige.png",
   "./assets/2d/kenney/ui/buttonLong_beige.png",
+  "./assets/2d/kenney/farm/dirtFarmland_E.png",
+  "./assets/2d/kenney/farm/corn_E.png",
+  "./assets/2d/kenney/farm/cornYoung_S.png",
+  "./assets/2d/kenney/farm/cornDouble_E.png",
+  "./assets/2d/kenney/farm/fenceHigh_N.png",
+  "./assets/2d/kenney/farm/fenceHigh_S.png",
+  "./assets/2d/kenney/farm/fenceHigh_W.png",
+  "./assets/2d/kenney/farm/sack_N.png",
+  "./assets/2d/kenney/farm/hayBalesStacked_W.png",
+  "./assets/2d/kenney/game-icons/trashcanOpen.png",
+  "./assets/2d/kenney/game-icons/multiplayer.png",
+  "./assets/2d/kenney/game-icons/medal1.png",
   "./assets/vendor/ASSET_CREDITS.md",
   "./assets/vendor/KENNEY_CC0_LICENSE.txt",
 ];

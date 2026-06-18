@@ -4,7 +4,9 @@
 - Simple Farm Tiles by ChikenwingJJA：OpenGameArt 页面标注 CC0。由于下载到的 PNG 在本次环境中出现异常内容污染，最终版本未直接加载该 PNG。
 - The Spriters Resource / Nexus Mods：仅做授权核验，不直接使用素材，因为官方说明不允许无授权再分发或要求原作者许可。
 - 爱给网：只使用明确 CC0/可商用标注的素材；本次未直接下载具体单项素材，避免授权不明。
-- 当前最终画面：已切换为 Canvas 2D 顶视角生存游戏，地图、角色、恐龙、建筑、地形、水面、天气、光照和大部分 UI 均为程序化绘制。
+- 当前最终画面：已切换为竖屏 Canvas 种菜系统，核心交互、背景、面板和部分蔬菜仍为程序化绘制。
+- Kenney Isometric Miniature Farm：官方页面标注 Creative Commons CC0，下载包用于农田、围栏、玉米、干草、袋子等农场装饰素材。
+- Kenney Game Icons：官方页面标注 Creative Commons CC0，下载包用于集市、奖章、回收等界面图标素材。
 - Kenney UI Pack RPG Expansion：官方页面标注 Creative Commons CC0，下载包用于按钮、面板等 2D UI 参考与素材。
 - Kenney Particle Pack：官方页面标注 Creative Commons CC0，下载包用于火焰、烟雾、斩击、光晕等 2D 粒子贴图。
 - Kenney Nature Kit：官方页面标注 Creative Commons CC0，历史 3D 版本曾用于树、棕榈、岩石、灌木等 GLB 模型；当前 2D 版本不再加载这些模型。

@@ -11,7 +11,6 @@ const toastEl = $("#toast");
 const sheet = $("#sheet");
 const sheetTitle = $("#sheetTitle");
 const sheetBody = $("#sheetBody");
-const syncInfo = $("#syncInfo");
 
 const SAVE_VERSION = 7;
 const CLIENT_KEY = "cloudFarm.clientId.v1";
@@ -19,6 +18,7 @@ const LOCAL_PLAYER_KEY = "cloudFarm.player.v1";
 const MUTATION_RATE = 1 / 1000;
 const ONLINE_WINDOW = 90_000;
 const RECENT_WINDOW = 10 * 60_000;
+const art = {};
 
 const crops = {
   carrot: { name: "胡萝卜", emoji: "🥕", growMs: 90_000, seedCost: 3, sell: 9, colors: ["#86c85a", "#ff9948"] },
@@ -43,6 +43,25 @@ let t = 0;
 let particles = [];
 let floating = [];
 let broadcast = null;
+
+[
+  ["field", "./assets/2d/kenney/farm/dirtFarmland_E.png"],
+  ["corn", "./assets/2d/kenney/farm/corn_E.png"],
+  ["cornYoung", "./assets/2d/kenney/farm/cornYoung_S.png"],
+  ["cornDouble", "./assets/2d/kenney/farm/cornDouble_E.png"],
+  ["fenceN", "./assets/2d/kenney/farm/fenceHigh_N.png"],
+  ["fenceS", "./assets/2d/kenney/farm/fenceHigh_S.png"],
+  ["fenceW", "./assets/2d/kenney/farm/fenceHigh_W.png"],
+  ["sack", "./assets/2d/kenney/farm/sack_N.png"],
+  ["hay", "./assets/2d/kenney/farm/hayBalesStacked_W.png"],
+  ["trash", "./assets/2d/kenney/game-icons/trashcanOpen.png"],
+  ["market", "./assets/2d/kenney/game-icons/multiplayer.png"],
+  ["medal", "./assets/2d/kenney/game-icons/medal1.png"],
+].forEach(([key, src]) => {
+  const img = new Image();
+  img.src = src;
+  art[key] = img;
+});
 
 function blankPlayer(name = "菜园主") {
   return {
@@ -139,7 +158,7 @@ function chooseNewestPlots(a = [], b = []) {
 }
 
 function start() {
-  room = ($("#roomCode").value || "PUBLIC-FARM").trim().toUpperCase();
+  room = "PUBLIC-FARM";
   const saved = JSON.parse(localStorage.getItem(LOCAL_PLAYER_KEY) || "null");
   const name = ($("#playerName").value || saved?.name || "菜园主").trim().slice(0, 14);
   db = safeReadDb();
@@ -290,7 +309,7 @@ function renderAll() {
   if (!player) return;
   $("#coinText").textContent = player.coins;
   $("#bagText").textContent = Object.values(player.inventory || {}).reduce((a, b) => a + b, 0);
-  $("#syncText").textContent = `房间 ${db.rev || 0}`;
+  $("#syncText").textContent = `全服 ${db.rev || 0}`;
   renderSeeds();
   if (!sheet.classList.contains("hidden")) openPanel(activePanel);
 }
@@ -322,7 +341,7 @@ function openBag() {
   const rows = Object.entries(player.inventory || {});
   sheetBody.innerHTML = rows.length ? rows.map(([key, qty]) => `
     <div class="card-row">
-      <div><strong>${itemName(key)}</strong><p>${isMutation(key) ? "稀有变异，可高价交易" : "普通蔬菜，可出售或上架"}</p></div>
+      <div class="item-title"><span class="item-icon">${itemIcon(key)}</span><div><strong>${itemName(key)}</strong><p>${isMutation(key) ? "稀有变异，可高价交易" : "普通蔬菜，可出售或上架"}</p></div></div>
       <div><span class="chip">×${qty}</span></div>
     </div>
     <div class="card-row">
@@ -344,7 +363,7 @@ function openMarket(filter = "") {
       ${listings.length ? listings.map((x) => `
         <div class="card-row">
           <div>
-            <strong>${itemName(x.item)} <span class="chip">×${x.qty}</span></strong>
+            <strong><span class="item-icon small">${itemIcon(x.item)}</span>${itemName(x.item)} <span class="chip">×${x.qty}</span></strong>
             <p>${x.sellerName} · ${x.price} 金币 · ${timeAgo(x.createdAt)}上架</p>
           </div>
           ${x.sellerId === clientId
@@ -386,6 +405,12 @@ function itemName(key) {
   const mutation = isMutation(key);
   const raw = mutation ? key.replace("mut_", "") : key;
   return `${mutation ? "✨变异" : ""}${crops[raw]?.name || raw}`;
+}
+
+function itemIcon(key) {
+  const raw = key.replace("mut_", "");
+  const icon = crops[raw]?.emoji || "🥬";
+  return isMutation(key) ? `✨${icon}` : icon;
 }
 
 function isMutation(key) {
@@ -457,17 +482,41 @@ function drawClouds(w) {
 function drawFarmBase(w, h) {
   ctx.save();
   ctx.translate(w / 2, h * 0.54);
-  ctx.fillStyle = "#79c86b";
-  roundRect(-w * 0.58, -h * 0.18, w * 1.16, h * 0.58, 34, true);
-  ctx.fillStyle = "rgba(255,255,255,.18)";
-  for (let i = 0; i < 28; i += 1) {
-    const x = Math.sin(i * 12.91) * w * 0.5;
-    const y = -h * 0.15 + ((i * 37) % (h * 0.5));
-    ctx.fillRect(x, y, 12, 3);
+  const grass = ctx.createLinearGradient(0, -h * 0.2, 0, h * 0.42);
+  grass.addColorStop(0, "#91db78");
+  grass.addColorStop(0.58, "#65bd65");
+  grass.addColorStop(1, "#4fa858");
+  ctx.fillStyle = grass;
+  roundRect(-w * 0.58, -h * 0.19, w * 1.16, h * 0.6, 38, true);
+  ctx.fillStyle = "rgba(255,255,255,.16)";
+  for (let i = 0; i < 34; i += 1) {
+    const x = Math.sin(i * 12.91) * w * 0.52;
+    const y = -h * 0.16 + ((i * 37) % (h * 0.54));
+    ctx.fillRect(x, y, 11, 3);
   }
-  ctx.fillStyle = "#b97a45";
-  roundRect(-w * 0.45, h * 0.18, w * 0.9, h * 0.16, 28, true);
+  drawFarmDecoration(w, h);
+  const path = ctx.createLinearGradient(0, h * 0.16, 0, h * 0.34);
+  path.addColorStop(0, "#c8884c");
+  path.addColorStop(1, "#a76538");
+  ctx.fillStyle = path;
+  roundRect(-w * 0.46, h * 0.18, w * 0.92, h * 0.16, 30, true);
   ctx.restore();
+}
+
+function drawFarmDecoration(w, h) {
+  const img = (key) => art[key]?.complete ? art[key] : null;
+  const drawImg = (key, x, y, size) => {
+    const asset = img(key);
+    if (!asset) return;
+    const ratio = asset.width / asset.height || 1;
+    ctx.drawImage(asset, x, y, size * ratio, size);
+  };
+  for (let i = 0; i < 5; i += 1) drawImg("fenceN", -w * 0.48 + i * 58, -h * 0.17, 42);
+  for (let i = 0; i < 5; i += 1) drawImg("fenceS", w * 0.18 + i * 50, -h * 0.17, 42);
+  drawImg("hay", -w * 0.43, h * 0.08, 64);
+  drawImg("sack", w * 0.32, h * 0.05, 54);
+  drawImg("cornDouble", -w * 0.48, -h * 0.04, 64);
+  drawImg("cornDouble", w * 0.38, -h * 0.02, 64);
 }
 
 function drawPlots(w, h) {
@@ -492,20 +541,24 @@ function drawPlot(plot, x, y, size, index) {
   ctx.save();
   ctx.translate(x, y);
   ctx.fillStyle = "rgba(95,55,25,.18)";
-  roundRect(4, 8, size, size, 22, true);
+  roundRect(4, 8, size, size, 24, true);
   const soil = ctx.createLinearGradient(0, 0, 0, size);
-  soil.addColorStop(0, "#9d663b");
-  soil.addColorStop(1, "#704126");
+  soil.addColorStop(0, "#b87945");
+  soil.addColorStop(0.52, "#8e5731");
+  soil.addColorStop(1, "#633a22");
   ctx.fillStyle = soil;
   roundRect(0, 0, size, size, 22, true);
-  ctx.strokeStyle = "rgba(255,239,195,.34)";
+  ctx.strokeStyle = "rgba(255,239,195,.22)";
   ctx.lineWidth = 2;
-  for (let k = 0; k < 4; k += 1) {
+  for (let k = 0; k < 5; k += 1) {
     ctx.beginPath();
-    ctx.moveTo(12, 18 + k * size / 5);
-    ctx.quadraticCurveTo(size * 0.5, 10 + k * size / 5, size - 12, 18 + k * size / 5);
+    ctx.moveTo(12, 14 + k * size / 6);
+    ctx.bezierCurveTo(size * 0.35, 6 + k * size / 6, size * 0.68, 22 + k * size / 6, size - 12, 14 + k * size / 6);
     ctx.stroke();
   }
+  ctx.strokeStyle = "rgba(77,43,24,.24)";
+  ctx.lineWidth = 1;
+  roundRect(2, 2, size - 4, size - 4, 20, false);
   if (plot.crop) drawCrop(plot, size);
   else {
     ctx.fillStyle = "rgba(255,255,255,.38)";
@@ -529,6 +582,15 @@ function drawCrop(plot, size) {
   const [leaf, fruit] = crop.colors;
   ctx.save();
   ctx.translate(size / 2, size * 0.56);
+  if (plot.crop === "corn" && art.corn?.complete) {
+    const asset = p > 0.72 ? art.cornDouble : p > 0.34 ? art.corn : art.cornYoung;
+    if (asset?.complete) {
+      const scale = p < 0.34 ? 0.58 : p < 0.72 ? 0.78 : 1;
+      ctx.drawImage(asset, -size * 0.32 * scale, -size * 0.52 * scale, size * 0.64 * scale, size * 0.72 * scale);
+      ctx.restore();
+      return;
+    }
+  }
   const stage = p < 0.34 ? 0.45 : p < 0.75 ? 0.72 : 1;
   ctx.scale(stage, stage);
   ctx.strokeStyle = leaf;
@@ -673,8 +735,6 @@ function toast(text) {
 
 function bind() {
   $("#enterGame").addEventListener("click", start);
-  $("#openSyncInfo").addEventListener("click", () => syncInfo.classList.remove("hidden"));
-  $("#closeSyncInfo").addEventListener("click", () => syncInfo.classList.add("hidden"));
   $("#closeSheet").addEventListener("click", () => openPanel("garden"));
   document.querySelector(".dock").addEventListener("click", (event) => {
     const panel = event.target.closest("[data-panel]")?.dataset.panel;
