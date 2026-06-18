@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#13251d" />
     <title>云上菜园 · 横板联机种菜</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=2" />
-    <link rel="stylesheet" href="./src/styles.css?v=2" />
+    <link rel="manifest" href="./manifest.webmanifest?v=3" />
+    <link rel="stylesheet" href="./src/styles.css?v=3" />
   </head>
   <body>
     <main id="app">
@@ -22,15 +22,15 @@
               <input id="playerName" maxlength="14" placeholder="菜园主" />
             </label>
             <label>
-              房间码
-              <input id="roomCode" maxlength="20" placeholder="FARM-520" />
+              地图频道
+              <input id="roomCode" maxlength="20" placeholder="PUBLIC-FARM" />
             </label>
           </div>
           <div class="button-row">
             <button id="startGame" class="primary">开始游戏</button>
             <button id="openBackend" class="ghost">GitHub 后端设置</button>
           </div>
-          <p class="note">提示：没有配置 GitHub Token 时，可先玩本地模式；配置后可用仓库文件同步房间。</p>
+          <p class="note">默认进入公共大地图。没有配置 GitHub Token 时可本地体验；配置后所有玩家会同步到同一张地图。</p>
         </div>
       </section>
 
@@ -56,23 +56,37 @@
           <div class="stat"><span>金币</span><strong id="coinText">0</strong></div>
           <div class="stat"><span>等级</span><strong id="levelText">1</strong></div>
           <div class="stat"><span>水量</span><strong id="waterText">100</strong></div>
-          <div class="stat"><span>房间</span><strong id="roomText">本地</strong></div>
+          <div class="stat"><span>地图</span><strong id="roomText">公共</strong></div>
         </div>
         <div class="hud sync">
+          <button id="chatToggle" class="mini">公屏</button>
           <button id="syncNow" class="mini">同步</button>
           <span id="syncStatus">本地模式</span>
         </div>
+        <aside id="chatPanel" class="chat-panel hidden">
+          <header>
+            <strong>世界公屏</strong>
+            <button id="closeChat" aria-label="关闭公屏">×</button>
+          </header>
+          <div id="chatMessages" class="chat-messages"></div>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" maxlength="60" placeholder="和大家说句话..." />
+            <button type="submit">发送</button>
+          </form>
+        </aside>
         <div class="crop-bar" id="cropBar"></div>
         <div class="controls">
           <div class="move-pad">
-            <button id="leftBtn" aria-label="向左">‹</button>
-            <button id="rightBtn" aria-label="向右">›</button>
+            <button id="upBtn" class="up" aria-label="向上">⌃</button>
+            <button id="leftBtn" class="left" aria-label="向左">‹</button>
+            <button id="rightBtn" class="right" aria-label="向右">›</button>
+            <button id="downBtn" class="down" aria-label="向下">⌄</button>
           </div>
           <div class="action-pad">
-            <button id="plantBtn">播种</button>
-            <button id="waterBtn">浇水</button>
-            <button id="harvestBtn">收获</button>
-            <button id="shopBtn">扩建</button>
+            <button id="plantBtn"><span>🌱</span>播种</button>
+            <button id="waterBtn"><span>💧</span>浇水</button>
+            <button id="harvestBtn"><span>🧺</span>收获</button>
+            <button id="shopBtn"><span>🔨</span>开垦</button>
           </div>
         </div>
         <div id="toast" class="toast hidden"></div>
@@ -80,6 +94,6 @@
 
       <section id="rotateTip" class="rotate-tip" aria-hidden="true"></section>
     </main>
-    <script type="module" src="./src/game.js?v=2"></script>
+    <script type="module" src="./src/game.js?v=3"></script>
   </body>
 </html>
