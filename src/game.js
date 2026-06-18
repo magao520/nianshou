@@ -95,10 +95,6 @@ buf.height = VIEW_H;
 const bx = buf.getContext("2d");
 bx.imageSmoothingEnabled = false;
 let worldBackdrop = null;
-const artBackground = new Image();
-let artBackgroundReady = false;
-artBackground.onload = () => { artBackgroundReady = true; };
-artBackground.src = "./assets/art/portrait_farm_background.jpg";
 
 // ---------- 像素工具 ----------
 function makeCanvas(w, h) {
@@ -786,82 +782,25 @@ function setTile(arr, x, y, v) {
 function buildWorldBackdrop() {
   const layer = makeCanvas(WORLD_W, WORLD_H);
   const g = layer.x;
-  const sky = g.createLinearGradient(0, 0, WORLD_W, WORLD_H);
-  sky.addColorStop(0, "#74c94a");
-  sky.addColorStop(0.55, "#4ea53a");
-  sky.addColorStop(1, "#2f7836");
-  g.fillStyle = sky;
-  g.fillRect(0, 0, WORLD_W, WORLD_H);
+  for (let y = 0; y < MAP_H; y += 1) {
+    for (let x = 0; x < MAP_W; x += 1) {
+      let tile = groundMap[y * MAP_W + x];
+      if (tile === 4 || tile === 5) tile = 4;
+      g.drawImage(SPRITES.tiles, tile * TILE, 0, TILE, TILE, x * TILE, y * TILE, TILE, TILE);
+      const o = overlayMap[y * MAP_W + x];
+      if (o >= 0) g.drawImage(SPRITES.tiles, o * TILE, 0, TILE, TILE, x * TILE, y * TILE, TILE, TILE);
+    }
+  }
 
-  // 手绘式草地噪点：一次性生成整张地图，不再像重复贴图。
-  for (let i = 0; i < 9000; i += 1) {
+  // 额外像素草点和花点，保持统一像素颗粒感。
+  for (let i = 0; i < 1800; i += 1) {
     const x = (i * 73 + i * i * 17) % WORLD_W;
     const y = (i * 47 + i * i * 29) % WORLD_H;
-    const tone = (x * 11 + y * 7 + i) % 6;
-    g.fillStyle = tone < 2 ? "rgba(35,112,44,.22)" : tone < 4 ? "rgba(132,211,91,.16)" : "rgba(255,255,255,.07)";
-    g.fillRect(x, y, tone < 4 ? 1 : 2, 1);
+    const t = groundMap[Math.floor(y / TILE) * MAP_W + Math.floor(x / TILE)];
+    if (t !== 0 && t !== 1 && t !== 2) continue;
+    g.fillStyle = i % 17 === 0 ? PAL.flower2 : i % 13 === 0 ? PAL.flower1 : (i % 3 ? PAL.grass4 : PAL.grass3);
+    g.fillRect(x, y, 1, 1);
   }
-
-  // 大块明暗草地区域，让画面像一张场景而不是贴图平铺。
-  const blobs = [
-    { x: 150, y: 110, r: 170, c: "rgba(126,207,85,.18)" },
-    { x: 780, y: 95, r: 210, c: "rgba(255,230,130,.10)" },
-    { x: 835, y: 520, r: 230, c: "rgba(21,78,44,.20)" },
-    { x: 270, y: 510, r: 240, c: "rgba(23,86,42,.16)" },
-  ];
-  blobs.forEach((b) => {
-    const grad = g.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
-    grad.addColorStop(0, b.c);
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    g.fillStyle = grad;
-    g.fillRect(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
-  });
-
-  // 连续道路，不再按格子贴。
-  g.lineCap = "round";
-  g.lineJoin = "round";
-  g.strokeStyle = "#8d6f4a";
-  g.lineWidth = 26;
-  g.beginPath();
-  g.moveTo(30, 22 * TILE + 8);
-  g.bezierCurveTo(270, 22 * TILE - 18, 520, 22 * TILE + 30, WORLD_W - 30, 22 * TILE + 8);
-  g.stroke();
-  g.strokeStyle = "#c4a679";
-  g.lineWidth = 20;
-  g.stroke();
-  g.strokeStyle = "rgba(255,238,183,.18)";
-  g.lineWidth = 2;
-  for (let x = 60; x < WORLD_W; x += 44) {
-    g.beginPath();
-    g.moveTo(x, 22 * TILE);
-    g.lineTo(x + 18, 22 * TILE + 6);
-    g.stroke();
-  }
-  g.strokeStyle = "#8d6f4a";
-  g.lineWidth = 24;
-  g.beginPath();
-  g.moveTo(28 * TILE + 8, 65);
-  g.bezierCurveTo(28 * TILE - 20, 210, 28 * TILE + 34, 440, 28 * TILE + 8, WORLD_H - 70);
-  g.stroke();
-  g.strokeStyle = "#c4a679";
-  g.lineWidth = 18;
-  g.stroke();
-
-  // 池塘
-  const pond = g.createRadialGradient(48 * TILE, 30 * TILE, 10, 48 * TILE, 30 * TILE, 90);
-  pond.addColorStop(0, "#66d7ff");
-  pond.addColorStop(0.62, "#2d9bd4");
-  pond.addColorStop(1, "#1b5f8f");
-  g.fillStyle = pond;
-  g.beginPath();
-  g.ellipse(48 * TILE, 30 * TILE, 74, 45, -0.08, 0, Math.PI * 2);
-  g.fill();
-  g.strokeStyle = "rgba(230,244,219,.55)";
-  g.lineWidth = 4;
-  g.stroke();
-  g.fillStyle = "rgba(255,255,255,.35)";
-  g.fillRect(48 * TILE - 25, 30 * TILE - 14, 22, 2);
-  g.fillRect(48 * TILE + 18, 30 * TILE + 9, 28, 2);
 
   worldBackdrop = layer.c;
 }
@@ -1542,20 +1481,11 @@ function render() {
 }
 
 function drawTiles(cam) {
-  if (artBackgroundReady) {
-    const sx = (cam.x / Math.max(1, WORLD_W - VIEW_W)) * Math.max(0, artBackground.width - VIEW_W);
-    const sy = (cam.y / Math.max(1, WORLD_H - VIEW_H)) * Math.max(0, artBackground.height - VIEW_H);
-    bx.imageSmoothingEnabled = true;
-    bx.drawImage(artBackground, sx, sy, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
-    bx.imageSmoothingEnabled = false;
-    return;
-  }
   if (!worldBackdrop) buildWorldBackdrop();
   bx.drawImage(worldBackdrop, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
 }
 
 function drawBuildings(cam) {
-  if (artBackgroundReady) return;
   buildingDefs.slice().sort((a, b) => (a.y + a.h) - (b.y + b.h)).forEach((b) => {
     const dx = Math.floor(b.x - cam.x);
     const dy = Math.floor(b.y - cam.y);
@@ -1569,7 +1499,6 @@ function drawBuildings(cam) {
 }
 
 function drawWorldProps(cam) {
-  if (artBackgroundReady) return;
   const trees = [
     { x: 3 * TILE, y: 8 * TILE, s: 1 }, { x: 6 * TILE, y: 6 * TILE, s: 1 },
     { x: 18 * TILE, y: 7 * TILE, s: 1 }, { x: 58 * TILE, y: 5 * TILE, s: 1 },
@@ -1636,13 +1565,6 @@ function drawPlots(cam) {
     const px = p.tx * TILE - cam.x;
     const py = p.ty * TILE - cam.y;
     if (px < -16 || px > VIEW_W || py < -16 || py > VIEW_H) return;
-    if (artBackgroundReady) {
-      if (p.id !== selectedPlotId && !p.crop) return;
-      if (!p.crop) {
-        drawPlotOutline(px, py, p.locked);
-        return;
-      }
-    }
     if (p.locked) {
       drawPlotPatch(px, py, "rgba(63,43,24,.72)", "rgba(255,255,255,.28)", true);
       return;

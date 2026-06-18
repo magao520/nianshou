@@ -1,12 +1,11 @@
-const CACHE_NAME = "cloud-farm-v13";
+const CACHE_NAME = "cloud-farm-v14";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=12",
-  "./src/styles.css?v=12",
-  "./src/game.js?v=12",
+  "./manifest.webmanifest?v=13",
+  "./src/styles.css?v=13",
+  "./src/game.js?v=13",
   "./assets/icon.svg",
-  "./assets/art/portrait_farm_background.jpg",
   "./assets/vendor/ASSET_CREDITS.md",
   "./assets/vendor/KENNEY_CC0_LICENSE.txt",
 ];
