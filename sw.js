@@ -1,15 +1,11 @@
-const CACHE_NAME = "cloud-farm-v5";
+const CACHE_NAME = "cloud-farm-v6";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=4",
-  "./src/styles.css?v=4",
-  "./src/game.js?v=4",
+  "./manifest.webmanifest?v=5",
+  "./src/styles.css?v=5",
+  "./src/game.js?v=5",
   "./assets/icon.svg",
-  "./assets/world_map.jpg",
-  "./assets/farmer.jpg",
-  "./assets/plot_soil.jpg",
-  "./assets/crops_mature.jpg",
 ];
 
 self.addEventListener("install", (event) => {

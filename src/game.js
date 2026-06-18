@@ -1,14 +1,71 @@
-const canvas = document.querySelector("#gameCanvas");
+/* ==============================================================
+   云上菜园 · 像素引擎 v5
+   - 60FPS 固定步长游戏循环（accumulator）
+   - 像素相机 480×270 内部分辨率 → 整数倍缩放
+   - 程序化生成所有像素美术（瓦片、角色、作物、建筑、UI）
+   - 帧动画状态机：idle / walk / action
+   - AABB 物理与碰撞
+   - WebAudio 程序化音效
+   - JSON 持久化 + GitHub 房间同步
+============================================================== */
+
+// ---------- 调色板 ----------
+const PAL = {
+  // 草地
+  grass1: "#5fb43a", grass2: "#4a9c2e", grass3: "#3a7d24", grass4: "#7cc94d",
+  flower1: "#ff6f8e", flower2: "#ffd84a", flower3: "#9d7dff",
+  // 土
+  soilDry: "#8a5a2b", soilWet: "#5d3a18", soilEdge: "#6a4221",
+  // 路
+  pathLight: "#d4b380", pathMid: "#b6926a", pathEdge: "#86694a",
+  // 水
+  waterLight: "#6cd0ff", waterMid: "#3aa8e4", waterDark: "#2070b0",
+  // 木
+  wood1: "#a16a3a", wood2: "#7d4e29", wood3: "#5a371b",
+  // 屋顶
+  roofRed: "#c14b3b", roofRedDark: "#8d2f24",
+  roofBlue: "#5e8fc4", roofBlueDark: "#3a5d8c",
+  roofGreen: "#5fa66b", roofGreenDark: "#3a7e48",
+  // 石
+  stone1: "#9aa3ad", stone2: "#6c7682", stone3: "#3e4854",
+  // 角色
+  skin: "#f3c19a", skinDk: "#c98966", hair: "#6a3d22",
+  shirt: "#fff3d4", shirtDk: "#cdb993",
+  pants: "#3a6cb0", pantsDk: "#264a82",
+  hat: "#d9b56b", hatDk: "#a07f3e",
+  shoe: "#3a2818",
+  // 作物
+  radishLeaf: "#5fb43a", radishRed: "#e64a4a", radishWhite: "#ffe4e0",
+  tomatoLeaf: "#3a7d24", tomatoRed: "#e74040", tomatoHighlight: "#ff8e6e",
+  pumpkinLeaf: "#3a7d24", pumpkinOrange: "#ff8c2a", pumpkinDk: "#b85a18",
+  cornLeaf: "#5fb43a", cornYellow: "#ffd34a", cornDk: "#b8852a",
+  // UI
+  uiCream: "#fff3d4", uiBrown: "#5a371b", uiGold: "#ffd166",
+};
+
+// ---------- 配置 ----------
+const VIEW_W = 480;          // 内部像素分辨率
+const VIEW_H = 270;
+const TILE = 16;             // 单瓦片尺寸
+const MAP_W = 64;            // 瓦片地图宽
+const MAP_H = 40;            // 瓦片地图高
+const WORLD_W = MAP_W * TILE; // 1024
+const WORLD_H = MAP_H * TILE; // 640
+const PLAYER_SPEED = 72;     // 像素/秒
+const FIXED_DT = 1 / 60;
+
+// ---------- 工具 ----------
+const $ = (s) => document.querySelector(s);
+const now = () => Date.now();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const irand = (a, b) => Math.floor(rand(a, b + 1));
+
+// ---------- DOM 引用 ----------
+const canvas = $("#gameCanvas");
 const ctx = canvas.getContext("2d");
-ctx.imageSmoothingEnabled = true;
-ctx.imageSmoothingQuality = "high";
+ctx.imageSmoothingEnabled = false;
 
-const BASE_WIDTH = 960;
-const BASE_HEIGHT = 540;
-const WORLD_WIDTH = 2048;
-const WORLD_HEIGHT = 1152;
-
-const $ = (selector) => document.querySelector(selector);
 const startScreen = $("#startScreen");
 const gameScreen = $("#gameScreen");
 const backendPanel = $("#backendPanel");
@@ -26,82 +83,664 @@ const ui = {
   chatInput: $("#chatInput"),
 };
 
-const crops = [
-  { id: "radish", name: "樱桃萝卜", col: 0, cost: 4, value: 12, grow: 14, xp: 4, water: 8, color: "#ff6b88" },
-  { id: "tomato", name: "星光番茄", col: 1, cost: 8, value: 25, grow: 24, xp: 8, water: 10, color: "#ff6b3d" },
-  { id: "pumpkin", name: "月亮南瓜", col: 2, cost: 16, value: 48, grow: 38, xp: 14, water: 13, color: "#ffb347" },
-  { id: "corn", name: "金穗玉米", col: 3, cost: 22, value: 64, grow: 46, xp: 20, water: 15, color: "#ffd166" },
-];
+// 内部像素画布
+const buf = document.createElement("canvas");
+buf.width = VIEW_W;
+buf.height = VIEW_H;
+const bx = buf.getContext("2d");
+bx.imageSmoothingEnabled = false;
 
-// 与油画背景中各建筑的视觉位置对齐
-const buildings = [
-  { id: "home", name: "玩家小屋", type: "home", x: 360, y: 470 },
-  { id: "market", name: "集市小站", type: "market", x: 700, y: 540 },
-  { id: "greenhouse", name: "星光温室", type: "greenhouse", x: 1180, y: 540 },
-  { id: "mill", name: "风车仓库", type: "mill", x: 1860, y: 360 },
-  { id: "pond", name: "月亮池塘", type: "pond", x: 1700, y: 870 },
-];
-
-// 资源
-const ASSET = {
-  worldMap: loadImage("./assets/world_map.jpg"),
-  farmer: loadImage("./assets/farmer.jpg", { chromaKey: 245 }),
-  soil: loadImage("./assets/plot_soil.jpg", { chromaKey: 245 }),
-  crops: loadImage("./assets/crops_mature.jpg", { chromaKey: 245 }),
-};
-
-function loadImage(src, options = {}) {
-  const img = new Image();
-  const wrap = { ready: false, image: null, raw: img };
-  img.crossOrigin = "anonymous";
-  img.onload = () => {
-    if (options.chromaKey) {
-      wrap.image = chromaKey(img, options.chromaKey);
-    } else {
-      wrap.image = img;
-    }
-    wrap.ready = true;
-  };
-  img.src = src;
-  return wrap;
+// ---------- 像素工具 ----------
+function makeCanvas(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const x = c.getContext("2d");
+  x.imageSmoothingEnabled = false;
+  return { c, x };
 }
 
-// 把白色背景去掉 (近白 -> 透明，浅色 -> 软透明)
-function chromaKey(img, threshold = 240) {
-  const c = document.createElement("canvas");
-  c.width = img.naturalWidth || img.width;
-  c.height = img.naturalHeight || img.height;
-  const cx = c.getContext("2d");
-  cx.drawImage(img, 0, 0);
-  const data = cx.getImageData(0, 0, c.width, c.height);
-  const arr = data.data;
-  for (let i = 0; i < arr.length; i += 4) {
-    const r = arr[i], g = arr[i + 1], b = arr[i + 2];
-    const lum = (r + g + b) / 3;
-    if (r > threshold && g > threshold && b > threshold) {
-      arr[i + 3] = 0;
-    } else if (lum > threshold - 22) {
-      arr[i + 3] = Math.max(0, Math.min(255, Math.floor((threshold - lum) * 14)));
+function fillRect(x, ctxRef, x0, y0, w, h) {
+  ctxRef.fillRect(x0, y0, w, h);
+}
+
+// 像素数组绘制 (将字符串数组按调色板染色)
+function paintPixels(target, ox, oy, lines, palette) {
+  for (let y = 0; y < lines.length; y += 1) {
+    const row = lines[y];
+    for (let x = 0; x < row.length; x += 1) {
+      const ch = row[x];
+      const color = palette[ch];
+      if (!color) continue;
+      target.fillStyle = color;
+      target.fillRect(ox + x, oy + y, 1, 1);
     }
   }
-  cx.putImageData(data, 0, 0);
-  return c;
 }
 
-const savedBackend = JSON.parse(localStorage.getItem("cloudFarmBackend") || "{}");
-const now = () => Date.now();
+// ---------- 程序化生成像素美术 ----------
+const SPRITES = {};
 
+function buildAssets() {
+  buildTileSet();
+  buildPlayer();
+  buildCrops();
+  buildBuildings();
+  buildUI();
+}
+
+// 瓦片集：grass / grassDeco1 / grassDeco2 / path / pathV / pathH / waterA / waterB / soil / soilWet / fence / stone
+function buildTileSet() {
+  const cols = 12;
+  const tile = makeCanvas(TILE * cols, TILE);
+  const x = tile.x;
+
+  // helper
+  const grassBase = (ox) => {
+    for (let py = 0; py < TILE; py += 1) {
+      for (let px = 0; px < TILE; px += 1) {
+        const v = (px * 7 + py * 13) % 5;
+        x.fillStyle = v === 0 ? PAL.grass3 : v === 1 ? PAL.grass2 : v === 2 ? PAL.grass4 : PAL.grass1;
+        x.fillRect(ox + px, py, 1, 1);
+      }
+    }
+  };
+
+  // 0: 纯草
+  grassBase(0);
+
+  // 1: 草+花
+  grassBase(TILE);
+  paintPixels(x, TILE + 4, 5, [" 1 ", "121", " 1 "], { "1": PAL.flower1, "2": PAL.flower2 });
+  paintPixels(x, TILE + 10, 10, [" 3 ", "333"], { "3": PAL.flower3 });
+
+  // 2: 草+小石头
+  grassBase(TILE * 2);
+  paintPixels(x, TILE * 2 + 5, 6, [" SS ", "SLLS", " SS "], { S: PAL.stone2, L: PAL.stone1 });
+
+  // 3: 路径中心
+  for (let py = 0; py < TILE; py += 1) {
+    for (let px = 0; px < TILE; px += 1) {
+      const v = (px * 5 + py * 11) % 7;
+      x.fillStyle = v < 2 ? PAL.pathEdge : v < 5 ? PAL.pathMid : PAL.pathLight;
+      x.fillRect(TILE * 3 + px, py, 1, 1);
+    }
+  }
+
+  // 4: 水（动画 A）
+  for (let py = 0; py < TILE; py += 1) {
+    for (let px = 0; px < TILE; px += 1) {
+      const v = (px + py) % 4;
+      x.fillStyle = v === 0 ? PAL.waterDark : v === 1 ? PAL.waterMid : PAL.waterLight;
+      x.fillRect(TILE * 4 + px, py, 1, 1);
+    }
+  }
+  // 高光
+  paintPixels(x, TILE * 4 + 2, 3, ["HH"], { H: "#ffffff" });
+  paintPixels(x, TILE * 4 + 9, 10, ["HHH"], { H: "#cfeaff" });
+
+  // 5: 水（动画 B）
+  for (let py = 0; py < TILE; py += 1) {
+    for (let px = 0; px < TILE; px += 1) {
+      const v = (px + py + 2) % 4;
+      x.fillStyle = v === 0 ? PAL.waterDark : v === 1 ? PAL.waterMid : PAL.waterLight;
+      x.fillRect(TILE * 5 + px, py, 1, 1);
+    }
+  }
+  paintPixels(x, TILE * 5 + 6, 5, ["HH"], { H: "#ffffff" });
+  paintPixels(x, TILE * 5 + 11, 12, ["HHH"], { H: "#cfeaff" });
+
+  // 6: 干土地块
+  for (let py = 0; py < TILE; py += 1) {
+    for (let px = 0; px < TILE; px += 1) {
+      const v = (px * 3 + py * 5) % 6;
+      x.fillStyle = v < 2 ? PAL.soilEdge : v < 4 ? PAL.soilDry : "#9c6a36";
+      x.fillRect(TILE * 6 + px, py, 1, 1);
+    }
+  }
+  // 犁沟横线
+  x.fillStyle = PAL.soilEdge;
+  for (let i = 3; i < TILE; i += 4) x.fillRect(TILE * 6 + 1, i, TILE - 2, 1);
+
+  // 7: 湿润土地块
+  for (let py = 0; py < TILE; py += 1) {
+    for (let px = 0; px < TILE; px += 1) {
+      const v = (px * 3 + py * 5) % 6;
+      x.fillStyle = v < 2 ? "#3e2410" : v < 4 ? PAL.soilWet : "#754826";
+      x.fillRect(TILE * 7 + px, py, 1, 1);
+    }
+  }
+  x.fillStyle = "#3e2410";
+  for (let i = 3; i < TILE; i += 4) x.fillRect(TILE * 7 + 1, i, TILE - 2, 1);
+
+  // 8: 木栅栏
+  paintPixels(x, TILE * 8, 0,
+    [
+      "                ",
+      "                ",
+      " WW WW WW WW WW ",
+      "WWWWWWWWWWWWWWWW",
+      " W  W  W  W  W  ",
+      " W  W  W  W  W  ",
+      "WWWWWWWWWWWWWWWW",
+      " W  W  W  W  W  ",
+      " W  W  W  W  W  ",
+      " W  W  W  W  W  ",
+      " W  W  W  W  W  ",
+      " W  W  W  W  W  ",
+      "                ",
+      "                ",
+      "                ",
+      "                ",
+    ], { W: PAL.wood2 });
+
+  // 9: 大石头
+  grassBase(TILE * 9);
+  paintPixels(x, TILE * 9 + 2, 3,
+    [
+      "  SSSS  ",
+      " SLLLLS ",
+      "SLLLLLLS",
+      "SLDDLLLS",
+      "SDDDLLLS",
+      " SSDLSS ",
+      "  SSSS  ",
+    ], { S: PAL.stone3, L: PAL.stone1, D: PAL.stone2 });
+
+  // 10: 灌木
+  grassBase(TILE * 10);
+  paintPixels(x, TILE * 10 + 2, 4,
+    [
+      " GGGGGG ",
+      "GGggGGgg",
+      "GgGGggGG",
+      "GGggGGgg",
+      " GggGGg ",
+      "  ssss  ",
+    ], { G: PAL.grass3, g: PAL.grass4, s: PAL.wood3 });
+
+  // 11: 木质地板
+  for (let py = 0; py < TILE; py += 1) {
+    for (let px = 0; px < TILE; px += 1) {
+      const v = (px + py) % 3;
+      x.fillStyle = v === 0 ? PAL.wood3 : v === 1 ? PAL.wood2 : PAL.wood1;
+      x.fillRect(TILE * 11 + px, py, 1, 1);
+    }
+  }
+
+  SPRITES.tiles = tile.c;
+}
+
+// 玩家：32x32 sprite, 4方向 × 4帧
+// 方向顺序：down, left, right, up
+function buildPlayer() {
+  const fw = 16, fh = 24, cols = 4, rows = 4;
+  const c = makeCanvas(fw * cols, fh * rows);
+  const x = c.x;
+
+  // 通用绘制
+  const drawFrame = (col, row, dir, frame) => {
+    const ox = col * fw, oy = row * fh;
+    const bob = frame === 1 || frame === 3 ? 0 : -1;     // 走路上下浮动
+    const legSwap = frame === 1 ? 1 : frame === 3 ? -1 : 0;
+    // 阴影
+    paintPixels(x, ox, oy,
+      [
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "                ",
+        "    SSSSSSSS    ",
+        "                ",
+      ], { S: "rgba(0,0,0,.45)" });
+
+    // 头/身体（共用）
+    const headY = 4 + bob;
+    // 帽子
+    paintPixels(x, ox + 3, oy + headY,
+      [
+        "  HHHHHH  ",
+        " HHHHHHHH ",
+        "HHHHHHHHHH",
+        "  hhhhhh  ",
+      ], { H: PAL.hat, h: PAL.hatDk });
+    // 头/脸
+    paintPixels(x, ox + 4, oy + headY + 4,
+      [
+        " ssssss ",
+        "ssssssss",
+        "skssssks",
+        "ssssssss",
+      ], { s: PAL.skin, k: "#3a2010" });
+    // 身体（衬衫）
+    paintPixels(x, ox + 4, oy + headY + 8,
+      [
+        "SSSSSSSS",
+        "ShSSSShS",
+        "SSSSSSSS",
+        "SSSSSSSS",
+      ], { S: PAL.shirt, h: PAL.shirtDk });
+    // 裤子
+    paintPixels(x, ox + 4, oy + headY + 12,
+      [
+        "PPPPPPPP",
+        "PPPPPPPP",
+      ], { P: PAL.pants });
+    // 腿
+    paintPixels(x, ox + 4, oy + headY + 14,
+      [
+        legSwap === 1 ? "PP    PP" : legSwap === -1 ? "  PPPP  " : " PP  PP ",
+        "BB    BB",
+      ], { P: PAL.pantsDk, B: PAL.shoe });
+
+    // 手臂朝向
+    if (dir === "left") {
+      paintPixels(x, ox + 2, oy + headY + 9,
+        ["SS", "SS"], { S: PAL.shirt });
+    } else if (dir === "right") {
+      paintPixels(x, ox + 12, oy + headY + 9,
+        ["SS", "SS"], { S: PAL.shirt });
+    } else if (dir === "up") {
+      // 头发覆盖脸
+      paintPixels(x, ox + 4, oy + headY + 4,
+        [
+          " HHHHHH ",
+          "HHHHHHHH",
+          "HHHHHHHH",
+          "HHHHHHHH",
+        ], { H: PAL.hair });
+    } else {
+      // down: 默认脸
+    }
+  };
+
+  ["down", "left", "right", "up"].forEach((dir, row) => {
+    for (let f = 0; f < 4; f += 1) drawFrame(f, row, dir, f);
+  });
+
+  SPRITES.player = c.c;
+}
+
+// 作物：4 种 × 4 阶段（种子 / 苗 / 半成 / 成熟），每帧 16×16
+function buildCrops() {
+  const cols = 4, rows = 4;
+  const c = makeCanvas(16 * cols, 16 * rows);
+  const x = c.x;
+
+  const stages = {
+    radish: [
+      // 种子
+      ["", "", "", "", "", "", "", "", "", "", "      ggg     ", "      gg      "],
+      // 苗
+      ["", "", "", "", "", "      gg      ", "     gGg      ", "      gg      ", "      gg      "],
+      // 半成
+      ["", "", "", "    gGg gGg   ", "    GGGgGGG   ", "     gGgGg    ", "      ggg     ", "      RR      "],
+      // 成熟
+      ["", "    gGg gGg   ", "   GGGGGGGG   ", "    gGGGGg    ", "     RRRR     ", "    RRWWRR    ", "    RRRRRR    ", "     RRRR     "],
+    ],
+    tomato: [
+      [],
+      ["", "", "", "", "      g       ", "     ggg      ", "      g       ", "      g       "],
+      ["", "", "      g       ", "     ggg      ", "    g r g     ", "      g       ", "      g       "],
+      ["", "    ggggg     ", "   ggGggGgg   ", "   gGRRRRGg   ", "   gRRrRRg    ", "    GRRRG     ", "      g       "],
+    ],
+    pumpkin: [
+      [],
+      ["", "", "", "", "      g       ", "     ggg      ", "      g       "],
+      ["", "", "    ggGgg     ", "    gGGGg     ", "    gGOGg     ", "    OOOOO     ", "      g       "],
+      ["", "    gggGgg    ", "   gGGGGGGg   ", "   gOOoOOOg   ", "   gOoOOoOg   ", "   gOOOOOOg   ", "    OOOOO     ", "     ggg      "],
+    ],
+    corn: [
+      [],
+      ["", "", "", "", "      g       ", "     ggg      ", "      g       "],
+      ["", "", "    g g g     ", "    gGgGg     ", "    Y g Y     ", "      g       "],
+      ["", "   g     g    ", "   gG y Gg    ", "   gG yyGg    ", "   gG yyGg    ", "    GyyG      ", "    yyyy      ", "     yy       "],
+    ],
+  };
+
+  const palette = {
+    radish: { g: PAL.radishLeaf, G: PAL.grass4, R: PAL.radishRed, W: PAL.radishWhite },
+    tomato: { g: PAL.tomatoLeaf, G: PAL.grass4, R: PAL.tomatoRed, r: PAL.tomatoHighlight, },
+    pumpkin: { g: PAL.pumpkinLeaf, G: PAL.grass4, O: PAL.pumpkinOrange, o: PAL.pumpkinDk },
+    corn: { g: PAL.cornLeaf, G: PAL.grass4, y: PAL.cornYellow, Y: PAL.cornDk },
+  };
+
+  ["radish", "tomato", "pumpkin", "corn"].forEach((id, col) => {
+    const sequences = stages[id];
+    sequences.forEach((lines, row) => {
+      const padded = [...lines];
+      while (padded.length < 16) padded.unshift("");
+      const norm = padded.map((l) => l.padEnd(16, " "));
+      paintPixels(x, col * 16, row * 16, norm, palette[id]);
+    });
+  });
+
+  SPRITES.crops = c.c;
+}
+
+// 建筑：每个 64×64 像素
+function buildBuildings() {
+  const items = ["home", "market", "greenhouse", "mill", "pond"];
+  const c = makeCanvas(64 * items.length, 64);
+  const x = c.x;
+
+  // home (0)
+  paintPixels(x, 0, 8,
+    [
+      "       RRRRRRRRRRRRRRRRRRRRRR        ",
+      "      RRRRRRRRRRRRRRRRRRRRRRRR       ",
+      "     RRRRRRRRRRRRRRRRRRRRRRRRRR      ",
+      "    RRrrrrrrrrrrrrrrrrrrrrrrrrRR     ",
+      "   RRrrrrrrrrrrrrrrrrrrrrrrrrrrRR    ",
+      "  RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR   ",
+      " WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW  ",
+      " WoWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWoW  ",
+      " WoWWWWWWWWWWWBBBBBBBBWWWWWWWWWWWoW  ",
+      " WWWWWWWWWWWWWBBBBBBBBWWWWWWWWWWWWW  ",
+      " WoWWWWWWWWWWWBBBBBBBBWWWWWWWWWWWoW  ",
+      " WoWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWoW  ",
+      " WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW  ",
+      " sssssssssssssssssssssssssssssssss   ",
+    ], { R: PAL.roofRed, r: PAL.roofRedDark, W: PAL.shirt, w: PAL.shirtDk, B: PAL.wood3, o: PAL.waterMid, s: PAL.stone2 });
+
+  // market (1)
+  const ox = 64;
+  paintPixels(x, ox, 12,
+    [
+      "                                ",
+      "    BBBBBBBBBBBBBBBBBBBBBBBB    ",
+      "   BWWWWWWWWWWWWWWWWWWWWWWWWB   ",
+      "  BWRRRRRRRRRRRRRRRRRRRRRRRRWB  ",
+      " BWRYYRYYRYYRYYRYYRYYRYYRYYRWB  ",
+      " BWRRRRRRRRRRRRRRRRRRRRRRRRRWB  ",
+      " WWWWWWWWWWWWWWWWWWWWWWWWWWWWW  ",
+      " WoooooooooooooooooooooooooooW  ",
+      " WoTTTTTToTTTTTToTTTTTToTTTTToW ",
+      " WoTGTGTToTGTGTToTGTGTToTGTGToW ",
+      " WoTTTTTToTTTTTToTTTTTToTTTTToW ",
+      " WoooooooooooooooooooooooooooW  ",
+      " WWWWWWWWWWWWWWWWWWWWWWWWWWWWW  ",
+      "                                ",
+    ], { B: PAL.wood3, W: PAL.wood1, R: PAL.roofRed, Y: PAL.uiCream, o: PAL.wood2, T: PAL.tomatoRed, G: PAL.tomatoLeaf });
+
+  // greenhouse (2)
+  const ox2 = 128;
+  paintPixels(x, ox2, 6,
+    [
+      "    WWWWWWWWWWWWWWWWWWWWWWWW   ",
+      "   WgGGGGGGGGGGGGGGGGGGGGGGgW  ",
+      "  WgGGGGGGGGGGGGGGGGGGGGGGGGgW ",
+      " WgGGggGGGGGggGGGGGggGGGGGgGgW ",
+      " WgGGGGGGGGGGGGGGGGGGGGGGGGGgW ",
+      " WgGGGGGGGGGGGGGGGGGGGGGGGGGgW ",
+      " WgGggGGGggGGGggGGGggGGGggGGgW ",
+      " WgGGGGGGGGGGGGGGGGGGGGGGGGGgW ",
+      " WWWWWWWWWWWWWWWWWWWWWWWWWWWWW ",
+      " WBBBWBBBBBBBBBBBBBBBBBBBWBBBW ",
+      " WBoBWBoooooooooooooooooBWBoBW ",
+      " WBoBWBooooDDoooooDDooooBWBoBW ",
+      " WBBBWBBBBBBBBBBBBBBBBBBBWBBBW ",
+      "                               ",
+    ], { W: PAL.stone1, g: PAL.waterLight, G: "#a8e8ff", B: PAL.wood2, o: PAL.wood1, D: PAL.wood3 });
+
+  // mill (3) - 风车
+  const ox3 = 192;
+  paintPixels(x, ox3, 0,
+    [
+      "        WWWWWW          ",
+      "       WoooooooW         ",
+      "      WoooooooooW        ",
+      "     WoooooooooooW       ",
+      "      WoooooooooW        ",
+      "       WoooooooW         ",
+      "        WWWWWW          ",
+      "         B  B           ",
+      "        BBBBBB          ",
+      "        BWWWWB          ",
+      "        BWWWWB          ",
+      "        BBBBBB          ",
+      "        BWWWWB          ",
+      "        BWWWWB          ",
+      "        BBBBBB          ",
+    ], { W: PAL.wood1, o: PAL.uiCream, B: PAL.wood3 });
+  // 风车叶片（静态）
+  paintPixels(x, ox3 + 8, 5,
+    [
+      " RR    RR ",
+      "RRRR  RRRR",
+      "RRRR  RRRR",
+      " RR    RR ",
+    ], { R: PAL.roofRed });
+
+  // pond (4)
+  const ox4 = 256;
+  paintPixels(x, ox4, 16,
+    [
+      "      WWWWWWWWWWWWWWWWWWWWWW    ",
+      "    WWaaaaaaaaaaaaaaaaaaaaaaWW  ",
+      "   WaaaabbbbaaaaaaaaaabbbbaaaaW ",
+      "  WaaabbbBBbbaaaaaabbbBBbbaaaaW ",
+      "  WaabbbBBBBbbaaaabbbBBBBbbaaaW ",
+      "  WaaabbbBBbbaaaaaabbbBBbbaaaW  ",
+      "   WaaaabbbbaaaaaaaaaabbbbaaaW  ",
+      "    WWaaaaaaaaaaaaaaaaaaaaaaWW  ",
+      "      WWWWWWWWWWWWWWWWWWWWWW    ",
+    ], { W: PAL.stone3, a: PAL.waterMid, b: PAL.waterDark, B: PAL.waterLight });
+
+  SPRITES.buildings = c.c;
+}
+
+// UI 图标：32×32 each, 4 个
+function buildUI() {
+  const c = makeCanvas(32 * 4, 32);
+  const x = c.x;
+
+  // 0 播种 - 种子袋
+  paintPixels(x, 4, 6,
+    [
+      "    BBBBBB  ",
+      "   BBwwwwBB ",
+      "  BBwwwwwwBB",
+      " BBwwwsswwBB",
+      " BwwwsssswwB",
+      " BwwwsswwwwB",
+      " BBwwwwwwwBB",
+      "  BBBBBBBBB ",
+      "    BBBB    ",
+    ], { B: PAL.wood3, w: PAL.uiCream, s: PAL.grass3 });
+
+  // 1 浇水 - 浇水壶
+  paintPixels(x, 32 + 4, 8,
+    [
+      "      BBBB     ",
+      "    BBBBBBB    ",
+      " BBBBwwwwwBBB  ",
+      "BwwwwwwwwwwwBB ",
+      "Bwwwwwwwwwwwww ",
+      "BwwwwwwwwwwwBB ",
+      "BwwwwwwwwwwBBB ",
+      " BBBBBBBBBBB   ",
+      "  d d d d      ",
+    ], { B: PAL.stone3, w: PAL.stone1, d: PAL.waterMid });
+
+  // 2 收获 - 篮子
+  paintPixels(x, 64 + 4, 8,
+    [
+      "    RRRR     ",
+      "   RRrrRR    ",
+      "  RRrrrrRR   ",
+      " WWWWWWWWWW  ",
+      " WBWBWBWBWW  ",
+      " WBBBBBBBBW  ",
+      " WBWBWBWBWW  ",
+      "  WWWWWWWW   ",
+    ], { R: PAL.tomatoRed, r: PAL.tomatoHighlight, W: PAL.wood1, B: PAL.wood3 });
+
+  // 3 开垦 - 锄头
+  paintPixels(x, 96 + 4, 5,
+    [
+      "         SS  ",
+      "        SSSS ",
+      "       SSSS  ",
+      "      SSSS   ",
+      "     WW S    ",
+      "    WWS      ",
+      "   WW        ",
+      "  WW         ",
+      " WW          ",
+    ], { S: PAL.stone1, W: PAL.wood2 });
+
+  SPRITES.ui = c.c;
+}
+
+// ---------- 关卡（瓦片地图） ----------
+// 0=grass 1=grassFlower 2=grassRock 3=path 4=waterA 5=waterB 6=soilDry 7=soilWet 8=fence 9=stone 10=bush 11=wood
+
+let groundMap = [];  // 地面层（草/路/水）
+let overlayMap = []; // 装饰层（花/石/灌木/栅栏 + 瓦片地块）
+let collisionMap = []; // 碰撞标记 (1=阻挡)
+
+function buildLevel() {
+  groundMap = new Array(MAP_W * MAP_H).fill(0);
+  overlayMap = new Array(MAP_W * MAP_H).fill(-1);
+  collisionMap = new Array(MAP_W * MAP_H).fill(0);
+
+  // 草地填底，加随机花/石
+  for (let y = 0; y < MAP_H; y += 1) {
+    for (let x = 0; x < MAP_W; x += 1) {
+      const r = (x * 31 + y * 17) % 100;
+      if (r < 6) overlayMap[y * MAP_W + x] = 1;
+      else if (r < 9) overlayMap[y * MAP_W + x] = 2;
+    }
+  }
+
+  // 一条横向主路 + 一条纵向路
+  for (let x = 2; x < MAP_W - 2; x += 1) {
+    setTile(groundMap, x, 22, 3);
+    overlayMap[22 * MAP_W + x] = -1;
+  }
+  for (let y = 4; y < MAP_H - 4; y += 1) {
+    setTile(groundMap, 28, y, 3);
+    overlayMap[y * MAP_W + 28] = -1;
+  }
+
+  // 池塘
+  for (let y = 28; y < 33; y += 1) {
+    for (let x = 44; x < 52; x += 1) {
+      setTile(groundMap, x, y, ((x + y) % 2) ? 4 : 5);
+      collisionMap[y * MAP_W + x] = 1;
+    }
+  }
+
+  // 围栏围起农场区域
+  for (let x = 2; x <= 26; x += 1) {
+    overlayMap[3 * MAP_W + x] = 8;
+    collisionMap[3 * MAP_W + x] = 1;
+  }
+  // 灌木点缀
+  for (let i = 0; i < 30; i += 1) {
+    const x = irand(0, MAP_W - 1);
+    const y = irand(0, MAP_H - 1);
+    if (groundMap[y * MAP_W + x] === 0 && overlayMap[y * MAP_W + x] < 0) {
+      overlayMap[y * MAP_W + x] = 10;
+      collisionMap[y * MAP_W + x] = 1;
+    }
+  }
+}
+
+function setTile(arr, x, y, v) {
+  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return;
+  arr[y * MAP_W + x] = v;
+}
+
+// ---------- 建筑实体 ----------
+const buildingDefs = [
+  { id: "home",       name: "玩家小屋", sprite: 0, x: 8 * TILE,   y: 8 * TILE,  w: 64, h: 56 },
+  { id: "market",     name: "集市小站", sprite: 1, x: 32 * TILE,  y: 6 * TILE,  w: 64, h: 56 },
+  { id: "greenhouse", name: "星光温室", sprite: 2, x: 44 * TILE,  y: 6 * TILE,  w: 64, h: 60 },
+  { id: "mill",       name: "风车仓库", sprite: 3, x: 22 * TILE,  y: 30 * TILE, w: 32, h: 56 },
+  { id: "pond",       name: "月亮池塘", sprite: 4, x: 44 * TILE,  y: 27 * TILE, w: 64, h: 32 },
+];
+
+function applyBuildingCollisions() {
+  buildingDefs.forEach((b) => {
+    const tx0 = Math.floor(b.x / TILE);
+    const ty0 = Math.floor((b.y + b.h - 16) / TILE);
+    const tx1 = Math.floor((b.x + b.w - 1) / TILE);
+    const ty1 = Math.floor((b.y + b.h - 1) / TILE);
+    for (let ty = ty0; ty <= ty1; ty += 1) {
+      for (let tx = tx0; tx <= tx1; tx += 1) {
+        if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H) {
+          collisionMap[ty * MAP_W + tx] = 1;
+        }
+      }
+    }
+  });
+}
+
+// ---------- 作物配置 ----------
+const crops = [
+  { id: "radish", name: "樱桃萝卜", col: 0, cost: 4, value: 12, grow: 14, xp: 4, water: 8 },
+  { id: "tomato", name: "星光番茄", col: 1, cost: 8, value: 25, grow: 24, xp: 8, water: 10 },
+  { id: "pumpkin", name: "月亮南瓜", col: 2, cost: 16, value: 48, grow: 38, xp: 14, water: 13 },
+  { id: "corn", name: "金穗玉米", col: 3, cost: 22, value: 64, grow: 46, xp: 20, water: 15 },
+];
+
+// ---------- 田地 ----------
+function createPlots() {
+  const plots = [];
+  // 农场区域 4 行 × 8 列，每块占 1 瓦
+  for (let row = 0; row < 4; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      plots.push({
+        id: `plot-${plots.length}`,
+        tx: 6 + col,
+        ty: 14 + row,
+        locked: plots.length >= 16,
+        crop: null,
+        plantedAt: 0,
+        wateredAt: 0,
+        moisture: 0,
+        fertility: 0.85 + (plots.length * 7 % 30) / 100,
+        harvests: 0,
+      });
+    }
+  }
+  return plots;
+}
+
+// ---------- 状态 ----------
+const savedBackend = JSON.parse(localStorage.getItem("cloudFarmBackend") || "{}");
 let selectedCrop = crops[0].id;
 let lastTime = performance.now();
+let accumulator = 0;
 let syncTimer = 0;
 let toastTimer = 0;
 let lastChatSignature = "";
-let input = { left: false, right: false, up: false, down: false };
+let input = { left: false, right: false, up: false, down: false, action: false };
 let game = createInitialState();
+let actionFlash = 0;
 
 function createInitialState() {
   return {
-    version: 4,
+    version: 5,
     room: "PUBLIC-FARM",
     updatedAt: now(),
     dayTime: 0.18,
@@ -113,52 +752,17 @@ function createInitialState() {
     player: {
       id: getClientId(),
       name: "菜园主",
-      x: 460,
-      y: 880,
-      facing: 1,
-      color: randomPlayerColor(),
+      x: 14 * TILE,
+      y: 22 * TILE,
+      vx: 0, vy: 0,
+      facing: "down",
+      anim: { state: "idle", frame: 0, t: 0 },
       lastSeen: now(),
     },
     visitors: {},
-    plots: createMapPlots(),
+    plots: createPlots(),
     chat: [],
     log: [],
-  };
-}
-
-// 把地块布置到油画中的草地空白处
-function createMapPlots() {
-  const clusters = [
-    { x: 80,   y: 880,  rows: 2, cols: 4 }, // 左下草地
-    { x: 480,  y: 950,  rows: 2, cols: 4 }, // 中下靠路
-    { x: 920,  y: 980,  rows: 2, cols: 4 }, // 中央广场下方
-    { x: 1340, y: 990,  rows: 2, cols: 3 }, // 右下池塘旁
-    { x: 1080, y: 760,  rows: 2, cols: 3 }, // 温室前广场
-  ];
-  const plots = [];
-  clusters.forEach((cluster, clusterIndex) => {
-    for (let row = 0; row < cluster.rows; row += 1) {
-      for (let col = 0; col < cluster.cols; col += 1) {
-        plots.push(makePlot(plots.length, cluster.x + col * 110, cluster.y + row * 70, clusterIndex));
-      }
-    }
-  });
-  return plots;
-}
-
-function makePlot(i, x, y, cluster = 0) {
-  return {
-    id: `plot-${i}`,
-    x,
-    y,
-    cluster,
-    locked: i >= 12,
-    crop: null,
-    plantedAt: 0,
-    wateredAt: 0,
-    moisture: 0,
-    fertility: 0.85 + ((i * 17) % 35) / 100,
-    harvests: 0,
   };
 }
 
@@ -171,23 +775,7 @@ function getClientId() {
   return id;
 }
 
-function randomPlayerColor() {
-  const colors = ["#55d37b", "#6fd3ff", "#ffd166", "#ff8fb7", "#c6a7ff"];
-  return colors[Math.floor(Math.random() * colors.length)];
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function showToast(message, tone = "normal") {
-  toastEl.textContent = message;
-  toastEl.style.border = tone === "bad" ? "1px solid rgba(255,107,107,.55)" : "1px solid rgba(255,255,255,.18)";
-  toastEl.classList.remove("hidden");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 2200);
-}
-
+// ---------- 持久化 ----------
 function saveLocal() {
   localStorage.setItem(`cloudFarm:${game.room}`, JSON.stringify(game));
 }
@@ -195,11 +783,7 @@ function saveLocal() {
 function loadLocal(room) {
   const raw = localStorage.getItem(`cloudFarm:${room}`);
   if (!raw) return null;
-  try {
-    return normalizeState(JSON.parse(raw));
-  } catch {
-    return null;
-  }
+  try { return normalizeState(JSON.parse(raw)); } catch { return null; }
 }
 
 function normalizeState(data) {
@@ -207,7 +791,7 @@ function normalizeState(data) {
   return {
     ...base,
     ...data,
-    player: { ...base.player, ...(data.player || {}), id: getClientId(), lastSeen: now() },
+    player: { ...base.player, ...(data.player || {}), id: getClientId(), lastSeen: now(), anim: base.player.anim },
     visitors: data.visitors || {},
     chat: Array.isArray(data.chat) ? data.chat.slice(-60) : [],
     plots: normalizePlots(data.plots, base.plots),
@@ -215,39 +799,105 @@ function normalizeState(data) {
 }
 
 function normalizePlots(savedPlots, basePlots) {
-  const saved = new Map((savedPlots || []).map((plot) => [plot.id, plot]));
-  return basePlots.map((base, i) => ({ ...base, ...(saved.get(base.id) || savedPlots?.[i] || {}) }));
+  const saved = new Map((savedPlots || []).map((p) => [p.id, p]));
+  return basePlots.map((b, i) => ({ ...b, ...(saved.get(b.id) || savedPlots?.[i] || {}) }));
 }
 
-function levelFromXp(xp) {
-  return Math.max(1, Math.floor(Math.sqrt(xp / 18)) + 1);
+// ---------- 玩家 / 物理 ----------
+function update(dt) {
+  const player = game.player;
+  let dx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  let dy = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+  player.vx = dx * PLAYER_SPEED;
+  player.vy = dy * PLAYER_SPEED;
+
+  // facing
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (dx > 0) player.facing = "right";
+    else if (dx < 0) player.facing = "left";
+  } else {
+    if (dy > 0) player.facing = "down";
+    else if (dy < 0) player.facing = "up";
+  }
+
+  const moving = (dx !== 0 || dy !== 0);
+  player.anim.state = moving ? "walk" : "idle";
+  player.anim.t += dt;
+  if (player.anim.t > 0.14) {
+    player.anim.t = 0;
+    player.anim.frame = (player.anim.frame + 1) % 4;
+  }
+  if (!moving) player.anim.frame = 0;
+
+  // AABB 碰撞解算
+  moveWithCollision(player, player.vx * dt, 0);
+  moveWithCollision(player, 0, player.vy * dt);
+
+  // 边界
+  player.x = clamp(player.x, 0, WORLD_W - 12);
+  player.y = clamp(player.y, 0, WORLD_H - 16);
+  player.lastSeen = now();
+
+  // 资源恢复
+  game.water = clamp(game.water + dt * 2.2, 0, 100);
+  game.plots.forEach((p) => {
+    if (p.crop) p.moisture = clamp((p.moisture || 0) - dt * 0.85, 0, 100);
+  });
+  game.dayTime = (game.dayTime + dt * 0.008) % 1;
+  game.updatedAt = now();
+  if (actionFlash > 0) actionFlash -= dt;
+
+  syncTimer += dt;
+  if (syncTimer > 8) {
+    syncTimer = 0;
+    saveLocal();
+    if (backendReady()) pushToGithub(true);
+  }
 }
 
-function cropById(id) {
-  return crops.find((crop) => crop.id === id) || crops[0];
+function moveWithCollision(p, dx, dy) {
+  // 玩家碰撞盒：12 宽 6 高（脚部）
+  const bx0 = -6, bx1 = 6, by0 = -2, by1 = 4;
+  const newX = p.x + dx;
+  const newY = p.y + dy;
+  const checkX = dx !== 0 ? newX : p.x;
+  const checkY = dy !== 0 ? newY : p.y;
+  const tx0 = Math.floor((checkX + bx0) / TILE);
+  const tx1 = Math.floor((checkX + bx1) / TILE);
+  const ty0 = Math.floor((checkY + by0) / TILE);
+  const ty1 = Math.floor((checkY + by1) / TILE);
+  for (let ty = ty0; ty <= ty1; ty += 1) {
+    for (let tx = tx0; tx <= tx1; tx += 1) {
+      if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return;
+      if (collisionMap[ty * MAP_W + tx]) return;
+    }
+  }
+  p.x = newX;
+  p.y = newY;
 }
 
+// ---------- 农事动作 ----------
 function getNearestPlot() {
-  return game.plots
-    .filter((plot) => !plot.locked)
-    .map((plot) => ({ plot, dist: Math.hypot(plot.x - game.player.x, plot.y - game.player.y) }))
-    .sort((a, b) => a.dist - b.dist)[0];
-}
-
-function getCropProgress(plot) {
-  if (!plot.crop) return 0;
-  const crop = cropById(plot.crop);
-  const moistureBoost = 0.72 + clamp(plot.moisture || 0, 0, 100) / 100 * 0.55;
-  const fertilityBoost = clamp(plot.fertility || 1, 0.75, 1.35);
-  return clamp(((now() - plot.plantedAt) / 1000 / crop.grow) * moistureBoost * fertilityBoost, 0, 1);
+  const px = game.player.x, py = game.player.y;
+  let best = null, bestD = Infinity;
+  game.plots.forEach((p) => {
+    if (p.locked) return;
+    const cx = p.tx * TILE + TILE / 2;
+    const cy = p.ty * TILE + TILE / 2;
+    const d = Math.hypot(cx - px, cy - py);
+    if (d < bestD) { bestD = d; best = p; }
+  });
+  return best ? { plot: best, dist: bestD } : null;
 }
 
 function plant() {
-  const target = getNearestPlot();
-  if (!target || target.dist > 90) return showToast("靠近一块空地再播种", "bad");
-  const plot = target.plot;
+  const t = getNearestPlot();
+  if (!t || t.dist > 24) return showToast("靠近一块空地再播种", "bad");
+  const plot = t.plot;
   if (plot.crop) return showToast("这块地已经种下作物了", "bad");
-  const crop = cropById(selectedCrop);
+  const crop = crops.find((c) => c.id === selectedCrop);
   if (game.coins < crop.cost) return showToast(`金币不足，需要 ${crop.cost}`, "bad");
   game.coins -= crop.cost;
   plot.crop = crop.id;
@@ -255,48 +905,57 @@ function plant() {
   plot.wateredAt = 0;
   plot.moisture = Math.max(plot.moisture || 0, 28);
   addLog(`${game.player.name} 种下了 ${crop.name}`);
+  Sfx.play("plant");
+  actionFlash = 0.2;
   saveLocal();
 }
 
 function water() {
-  const target = getNearestPlot();
-  if (!target || target.dist > 96) return showToast("靠近作物再浇水", "bad");
-  const plot = target.plot;
+  const t = getNearestPlot();
+  if (!t || t.dist > 24) return showToast("靠近作物再浇水", "bad");
+  const plot = t.plot;
   if (!plot.crop) return showToast("这块地还没有作物", "bad");
-  const cost = cropById(plot.crop).water;
-  if (game.water < cost) return showToast(`水量不足，需要 ${cost}`, "bad");
-  game.water -= cost;
+  const crop = crops.find((c) => c.id === plot.crop);
+  if (game.water < crop.water) return showToast(`水量不足，需要 ${crop.water}`, "bad");
+  game.water -= crop.water;
   plot.wateredAt = now();
   plot.moisture = clamp((plot.moisture || 0) + 45, 0, 100);
   plot.fertility = clamp((plot.fertility || 1) + 0.015, 0.75, 1.35);
   addLog(`${game.player.name} 给作物浇了水`);
+  Sfx.play("water");
+  actionFlash = 0.2;
   saveLocal();
 }
 
 function harvest() {
-  const target = getNearestPlot();
-  if (!target || target.dist > 96) return showToast("靠近成熟作物再收获", "bad");
-  const plot = target.plot;
+  const t = getNearestPlot();
+  if (!t || t.dist > 24) return showToast("靠近成熟作物再收获", "bad");
+  const plot = t.plot;
   if (!plot.crop) return showToast("这里还没有可收获的作物", "bad");
   const progress = getCropProgress(plot);
-  if (progress < 1) return showToast(`还需要 ${Math.ceil((1 - progress) * cropById(plot.crop).grow)} 秒成熟`, "bad");
-  const crop = cropById(plot.crop);
+  if (progress < 1) {
+    const crop = crops.find((c) => c.id === plot.crop);
+    return showToast(`还需要 ${Math.ceil((1 - progress) * crop.grow)} 秒成熟`, "bad");
+  }
+  const crop = crops.find((c) => c.id === plot.crop);
   const combo = 1 + Math.min(0.4, plot.harvests * 0.04);
   const gain = Math.round(crop.value * combo);
   game.coins += gain;
   game.xp += crop.xp;
-  game.level = levelFromXp(game.xp);
+  game.level = Math.max(1, Math.floor(Math.sqrt(game.xp / 18)) + 1);
   plot.crop = null;
   plot.harvests += 1;
   plot.moisture = clamp((plot.moisture || 0) - 20, 0, 100);
   plot.fertility = clamp((plot.fertility || 1) - 0.025, 0.75, 1.35);
   addLog(`${game.player.name} 收获 ${crop.name}，获得 ${gain} 金币`);
   showToast(`收获成功 +${gain} 金币`);
+  Sfx.play("harvest");
+  actionFlash = 0.25;
   saveLocal();
 }
 
 function expandFarm() {
-  const locked = game.plots.find((plot) => plot.locked);
+  const locked = game.plots.find((p) => p.locked);
   if (!locked) return showToast("菜园已经全部解锁");
   const price = 55 + game.expansion * 18;
   if (game.coins < price) return showToast(`开垦新田需要 ${price} 金币`, "bad");
@@ -306,11 +965,255 @@ function expandFarm() {
   locked.fertility = 1.08;
   showToast("新田已开垦");
   addLog(`${game.player.name} 开垦了一块新田`);
+  Sfx.play("expand");
   saveLocal();
+}
+
+function getCropProgress(plot) {
+  if (!plot.crop) return 0;
+  const crop = crops.find((c) => c.id === plot.crop);
+  const moistureBoost = 0.72 + clamp(plot.moisture || 0, 0, 100) / 100 * 0.55;
+  const fertilityBoost = clamp(plot.fertility || 1, 0.75, 1.35);
+  return clamp(((now() - plot.plantedAt) / 1000 / crop.grow) * moistureBoost * fertilityBoost, 0, 1);
 }
 
 function addLog(message) {
   game.log = [{ t: now(), message }, ...(game.log || [])].slice(0, 20);
+}
+
+// ---------- Toast ----------
+function showToast(message, tone = "normal") {
+  toastEl.textContent = message;
+  toastEl.style.border = tone === "bad" ? "1px solid rgba(255,107,107,.55)" : "1px solid rgba(255,255,255,.18)";
+  toastEl.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 2200);
+}
+
+// ---------- 渲染 ----------
+function render() {
+  bx.fillStyle = "#0e1b17";
+  bx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  const cam = {
+    x: clamp(Math.floor(game.player.x - VIEW_W / 2), 0, WORLD_W - VIEW_W),
+    y: clamp(Math.floor(game.player.y - VIEW_H / 2 - 8), 0, WORLD_H - VIEW_H),
+  };
+
+  drawTiles(cam);
+  drawBuildings(cam);
+  drawPlots(cam);
+  drawCrops(cam);
+
+  // 排序绘制玩家
+  const players = [game.player, ...Object.values(game.visitors || {}).filter((p) => p.id !== game.player.id && now() - p.lastSeen < 45000)];
+  players.sort((a, b) => a.y - b.y).forEach((p) => drawPlayer(p, cam, p.id === game.player.id));
+
+  drawHover(cam);
+  drawNight();
+  drawHudOverlay();
+
+  // 缩放到屏幕
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, w, h);
+  // 居中放大
+  const scale = Math.max(1, Math.min(Math.floor(w / VIEW_W), Math.floor(h / VIEW_H)));
+  const sw = VIEW_W * scale;
+  const sh = VIEW_H * scale;
+  const ox = Math.floor((w - sw) / 2);
+  const oy = Math.floor((h - sh) / 2);
+  ctx.drawImage(buf, 0, 0, VIEW_W, VIEW_H, ox, oy, sw, sh);
+  drawMiniMap(cam);
+  updateHud();
+  renderChat();
+}
+
+function drawTiles(cam) {
+  const tx0 = Math.max(0, Math.floor(cam.x / TILE));
+  const ty0 = Math.max(0, Math.floor(cam.y / TILE));
+  const tx1 = Math.min(MAP_W - 1, Math.ceil((cam.x + VIEW_W) / TILE));
+  const ty1 = Math.min(MAP_H - 1, Math.ceil((cam.y + VIEW_H) / TILE));
+  const waterFrame = Math.floor((Date.now() / 500) % 2);
+  for (let y = ty0; y <= ty1; y += 1) {
+    for (let x = tx0; x <= tx1; x += 1) {
+      let g = groundMap[y * MAP_W + x];
+      if (g === 4 || g === 5) g = waterFrame === 0 ? 4 : 5;
+      bx.drawImage(SPRITES.tiles, g * TILE, 0, TILE, TILE, x * TILE - cam.x, y * TILE - cam.y, TILE, TILE);
+      const o = overlayMap[y * MAP_W + x];
+      if (o >= 0) {
+        bx.drawImage(SPRITES.tiles, o * TILE, 0, TILE, TILE, x * TILE - cam.x, y * TILE - cam.y, TILE, TILE);
+      }
+    }
+  }
+}
+
+function drawBuildings(cam) {
+  buildingDefs.slice().sort((a, b) => (a.y + a.h) - (b.y + b.h)).forEach((b) => {
+    const sx = b.sprite * 64;
+    bx.drawImage(SPRITES.buildings, sx, 0, 64, 64, b.x - cam.x, b.y - cam.y, 64, 64);
+    // 名牌
+    const lx = b.x - cam.x + b.w / 2;
+    const ly = b.y - cam.y - 4;
+    drawLabel(b.name, lx, ly);
+  });
+}
+
+function drawLabel(text, cx, cy) {
+  bx.font = "bold 8px monospace";
+  const w = bx.measureText(text).width + 6;
+  bx.fillStyle = "rgba(0,0,0,0.65)";
+  bx.fillRect(Math.floor(cx - w / 2), Math.floor(cy - 9), Math.ceil(w), 10);
+  bx.fillStyle = PAL.uiCream;
+  bx.textAlign = "center";
+  bx.textBaseline = "middle";
+  bx.fillText(text, Math.floor(cx), Math.floor(cy - 4));
+}
+
+function drawPlots(cam) {
+  game.plots.forEach((p) => {
+    const px = p.tx * TILE - cam.x;
+    const py = p.ty * TILE - cam.y;
+    if (px < -16 || px > VIEW_W || py < -16 || py > VIEW_H) return;
+    if (p.locked) {
+      bx.fillStyle = "rgba(0,0,0,0.45)";
+      bx.fillRect(px, py, TILE, TILE);
+      bx.strokeStyle = "rgba(255,255,255,0.4)";
+      bx.setLineDash([2, 2]);
+      bx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
+      bx.setLineDash([]);
+      return;
+    }
+    const moist = clamp(p.moisture || 0, 0, 100) / 100;
+    const tile = moist > 0.15 ? 7 : 6;
+    bx.drawImage(SPRITES.tiles, tile * TILE, 0, TILE, TILE, px, py, TILE, TILE);
+  });
+}
+
+function drawCrops(cam) {
+  game.plots.forEach((p) => {
+    if (!p.crop || p.locked) return;
+    const px = p.tx * TILE - cam.x;
+    const py = p.ty * TILE - cam.y;
+    if (px < -16 || px > VIEW_W || py < -16 || py > VIEW_H) return;
+    const crop = crops.find((c) => c.id === p.crop);
+    const progress = getCropProgress(p);
+    const stage = progress >= 1 ? 3 : progress >= 0.65 ? 2 : progress >= 0.3 ? 1 : 0;
+    bx.drawImage(SPRITES.crops, crop.col * 16, stage * 16, 16, 16, px, py, 16, 16);
+    // 成熟闪光
+    if (progress >= 1 && Math.floor(Date.now() / 300) % 2 === 0) {
+      bx.fillStyle = "rgba(255,243,167,0.75)";
+      bx.fillRect(px + 7, py - 1, 2, 2);
+    }
+  });
+}
+
+function drawPlayer(p, cam, isSelf) {
+  const dirRow = { down: 0, left: 1, right: 2, up: 3 }[p.facing] || 0;
+  const frame = p.anim?.frame || 0;
+  const sx = frame * 16, sy = dirRow * 24;
+  const dx = Math.floor(p.x - cam.x - 8);
+  const dy = Math.floor(p.y - cam.y - 20);
+
+  // 阴影
+  bx.fillStyle = "rgba(0,0,0,0.35)";
+  bx.beginPath();
+  bx.ellipse(dx + 8, dy + 22, 5, 2, 0, 0, Math.PI * 2);
+  bx.fill();
+
+  bx.drawImage(SPRITES.player, sx, sy, 16, 24, dx, dy, 16, 24);
+
+  // 名字
+  bx.font = "bold 7px monospace";
+  const text = isSelf ? `${p.name}(你)` : p.name;
+  const w = bx.measureText(text).width + 4;
+  bx.fillStyle = isSelf ? PAL.uiGold : "rgba(0,0,0,0.7)";
+  bx.fillRect(dx + 8 - w / 2, dy - 8, w, 8);
+  bx.fillStyle = isSelf ? "#1a1408" : PAL.uiCream;
+  bx.textAlign = "center";
+  bx.textBaseline = "middle";
+  bx.fillText(text, dx + 8, dy - 4);
+}
+
+function drawHover(cam) {
+  const t = getNearestPlot();
+  if (!t || t.dist > 28) return;
+  const px = t.plot.tx * TILE - cam.x;
+  const py = t.plot.ty * TILE - cam.y;
+  const blink = Math.floor(Date.now() / 200) % 2 === 0;
+  bx.strokeStyle = blink ? "#ffe066" : "#fff3a7";
+  bx.lineWidth = 1;
+  bx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
+  if (actionFlash > 0) {
+    bx.fillStyle = `rgba(255, 255, 255, ${actionFlash})`;
+    bx.fillRect(px, py, TILE, TILE);
+  }
+}
+
+function drawNight() {
+  const night = Math.max(0, Math.sin(game.dayTime * Math.PI * 2 - 0.8));
+  if (night <= 0) return;
+  bx.fillStyle = `rgba(13, 28, 60, ${night * 0.4})`;
+  bx.fillRect(0, 0, VIEW_W, VIEW_H);
+}
+
+function drawHudOverlay() {
+  // 像素 HUD：已经在 DOM 顶部了，这里只画日志
+  const entries = (game.log || []).slice(0, 3);
+  if (!entries.length) return;
+  bx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  bx.fillRect(4, VIEW_H - 38, 200, 34);
+  bx.fillStyle = PAL.uiCream;
+  bx.font = "7px monospace";
+  bx.textAlign = "left";
+  bx.textBaseline = "alphabetic";
+  entries.forEach((e, i) => bx.fillText(e.message.slice(0, 32), 8, VIEW_H - 28 + i * 10));
+}
+
+// 小地图 (画在主 canvas 上，不进缓冲)
+function drawMiniMap(cam) {
+  const w = 132, h = 84;
+  const x = canvas.width - w - 14;
+  const y = canvas.height - h - 14;
+  ctx.fillStyle = "rgba(8,20,15,0.78)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  // 用 buf 当快照
+  const sx = (w - 8) / WORLD_W;
+  const sy = (h - 8) / WORLD_H;
+  // 草地铺底
+  ctx.fillStyle = "#2c5d36";
+  ctx.fillRect(x + 4, y + 4, w - 8, h - 8);
+  // 路
+  ctx.fillStyle = "#b6926a";
+  ctx.fillRect(x + 4 + 2 * TILE * sx, y + 4 + 22 * TILE * sy, (MAP_W - 4) * TILE * sx, 1 * TILE * sy);
+  ctx.fillRect(x + 4 + 28 * TILE * sx, y + 4 + 4 * TILE * sy, 1 * TILE * sx, (MAP_H - 8) * TILE * sy);
+  // 池塘
+  ctx.fillStyle = "#3aa8e4";
+  ctx.fillRect(x + 4 + 44 * TILE * sx, y + 4 + 28 * TILE * sy, 8 * TILE * sx, 5 * TILE * sy);
+  // 建筑点
+  ctx.fillStyle = "#ffd166";
+  buildingDefs.forEach((b) => {
+    ctx.fillRect(x + 4 + b.x * sx, y + 4 + b.y * sy, Math.max(2, b.w * sx), Math.max(2, b.h * sy));
+  });
+  // 视野框
+  ctx.strokeStyle = "#fff3a7";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 4 + cam.x * sx, y + 4 + cam.y * sy, VIEW_W * sx, VIEW_H * sy);
+  // 玩家
+  ctx.fillStyle = "#55d37b";
+  ctx.beginPath();
+  ctx.arc(x + 4 + game.player.x * sx, y + 4 + game.player.y * sy, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ---------- HUD / 聊天 ----------
+function updateHud() {
+  ui.coin.textContent = Math.floor(game.coins);
+  ui.level.textContent = game.level;
+  ui.water.textContent = Math.floor(game.water);
+  ui.room.textContent = game.room;
 }
 
 function renderCropBar() {
@@ -318,366 +1221,30 @@ function renderCropBar() {
   crops.forEach((crop) => {
     const button = document.createElement("button");
     button.className = `crop-choice ${selectedCrop === crop.id ? "active" : ""}`;
-    button.innerHTML = `<span class="ico" style="background-image:url('./assets/crops_mature.jpg');background-size:400% 100%;background-position:${(crop.col / 3) * 100}% 50%"></span><strong>${crop.name}</strong><small>${crop.cost} 金</small>`;
+    // 用 sprite 图集生成 dataURL 的 column
+    const ico = document.createElement("canvas");
+    ico.width = 16; ico.height = 16;
+    const icx = ico.getContext("2d");
+    icx.imageSmoothingEnabled = false;
+    if (SPRITES.crops) icx.drawImage(SPRITES.crops, crop.col * 16, 3 * 16, 16, 16, 0, 0, 16, 16);
+    button.innerHTML = `<span class="ico"></span><strong>${crop.name}</strong><small>${crop.cost} 金</small>`;
+    button.querySelector(".ico").style.backgroundImage = `url(${ico.toDataURL()})`;
     button.title = crop.name;
     button.addEventListener("click", () => {
       selectedCrop = crop.id;
       renderCropBar();
+      Sfx.play("ui");
     });
     ui.cropBar.appendChild(button);
   });
 }
 
-function update(delta) {
-  const movingX = Number(input.right) - Number(input.left);
-  const movingY = Number(input.down) - Number(input.up);
-  const length = Math.hypot(movingX, movingY) || 1;
-  const speed = 240;
-  if (input.left) game.player.facing = -1;
-  if (input.right) game.player.facing = 1;
-  game.player.x += (movingX / length) * speed * delta;
-  game.player.y += (movingY / length) * speed * delta;
-  game.player.x = clamp(game.player.x, 60, WORLD_WIDTH - 60);
-  game.player.y = clamp(game.player.y, 200, WORLD_HEIGHT - 60);
-  game.player.lastSeen = now();
-  game.water = clamp(game.water + delta * 2.2, 0, 100);
-  game.plots.forEach((plot) => {
-    if (plot.crop) plot.moisture = clamp((plot.moisture || 0) - delta * 0.85, 0, 100);
-  });
-  game.dayTime = (game.dayTime + delta * 0.008) % 1;
-  game.updatedAt = now();
-  syncTimer += delta;
-  if (syncTimer > 8) {
-    syncTimer = 0;
-    backgroundSync();
-  }
-}
-
-function draw() {
-  const width = canvas.width;
-  const height = canvas.height;
-  const camera = {
-    x: clamp(game.player.x - width * 0.5, 0, Math.max(0, WORLD_WIDTH - width)),
-    y: clamp(game.player.y - height * 0.55, 0, Math.max(0, WORLD_HEIGHT - height)),
-  };
-
-  ctx.clearRect(0, 0, width, height);
-  drawBackground(camera);
-  drawPlots(camera);
-  drawBuildingLabels(camera);
-  drawSunsetOverlay();
-
-  const players = [game.player, ...Object.values(game.visitors || {}).filter((p) => p.id !== game.player.id && now() - p.lastSeen < 45000)];
-  players
-    .sort((a, b) => a.y - b.y)
-    .forEach((player) => drawPlayer(player, camera, player.id === game.player.id));
-
-  drawPointer(camera);
-  drawMiniMap(camera);
-  drawLog();
-  updateHud();
-  renderChat();
-}
-
-function drawBackground(camera) {
-  const map = ASSET.worldMap;
-  if (map.ready) {
-    const img = map.image;
-    const sx = (camera.x / WORLD_WIDTH) * img.width;
-    const sy = (camera.y / WORLD_HEIGHT) * img.height;
-    const sw = (canvas.width / WORLD_WIDTH) * img.width;
-    const sh = (canvas.height / WORLD_HEIGHT) * img.height;
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-  } else {
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, "#8ed6ff");
-    gradient.addColorStop(0.55, "#ffe0a3");
-    gradient.addColorStop(1, "#2f7d44");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }
-}
-
-function drawSunsetOverlay() {
-  const night = Math.max(0, Math.sin(game.dayTime * Math.PI * 2 - 0.8));
-  if (night <= 0) return;
-  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  grad.addColorStop(0, `rgba(13, 28, 60, ${night * 0.34})`);
-  grad.addColorStop(1, `rgba(20, 45, 70, ${night * 0.18})`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
-
-function drawPlots(camera) {
-  const sortedPlots = [...game.plots].sort((a, b) => a.y - b.y);
-  sortedPlots.forEach((plot) => {
-    const x = plot.x - camera.x;
-    const y = plot.y - camera.y;
-    if (x < -120 || x > canvas.width + 120 || y < -90 || y > canvas.height + 110) return;
-
-    if (plot.locked) {
-      ctx.save();
-      ctx.fillStyle = "rgba(20,30,18,.55)";
-      ctx.beginPath();
-      ctx.ellipse(x, y, 50, 26, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,.35)";
-      ctx.setLineDash([5, 5]);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,.86)";
-      ctx.font = "700 13px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("未开垦", x, y + 4);
-      ctx.restore();
-      return;
-    }
-
-    // 阴影
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,.28)";
-    ctx.beginPath();
-    ctx.ellipse(x, y + 4, 54, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // 土壤精灵图
-    const soil = ASSET.soil;
-    const dw = 110;
-    const dh = 60;
-    if (soil.ready) {
-      ctx.drawImage(soil.image, x - dw / 2, y - dh / 2, dw, dh);
-    } else {
-      ctx.save();
-      ctx.fillStyle = "#6c4a2a";
-      ctx.beginPath();
-      ctx.ellipse(x, y, 50, 26, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // 浇水高光
-    const moisture = clamp(plot.moisture || 0, 0, 100) / 100;
-    if (moisture > 0.05) {
-      ctx.save();
-      ctx.fillStyle = `rgba(108, 211, 255, ${moisture * 0.3})`;
-      ctx.beginPath();
-      ctx.ellipse(x, y, 42, 20, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    if (plot.crop) drawCrop(plot, x, y);
-  });
-}
-
-function drawCrop(plot, x, y) {
-  const crop = cropById(plot.crop);
-  const progress = getCropProgress(plot);
-  const cropsAtlas = ASSET.crops;
-
-  // 长出来的茎/草
-  const stemLen = 4 + progress * 14;
-  ctx.save();
-  ctx.strokeStyle = "rgba(58, 130, 70, .9)";
-  ctx.lineWidth = 3;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(x - 6, y - 4);
-  ctx.quadraticCurveTo(x - 10, y - stemLen, x, y - stemLen - 2);
-  ctx.moveTo(x + 6, y - 4);
-  ctx.quadraticCurveTo(x + 10, y - stemLen, x, y - stemLen - 2);
-  ctx.stroke();
-  ctx.restore();
-
-  if (cropsAtlas.ready) {
-    const img = cropsAtlas.image;
-    const cellW = img.width / 4;
-    const cellH = img.height;
-    const sx = crop.col * cellW;
-    const targetH = 28 + progress * 56;
-    const targetW = targetH * (cellW / cellH);
-    ctx.drawImage(
-      img,
-      sx, 0, cellW, cellH,
-      x - targetW / 2, y - targetH * 0.85, targetW, targetH
-    );
-  } else {
-    ctx.fillStyle = crop.color;
-    ctx.beginPath();
-    ctx.arc(x, y - 14 - progress * 14, 8 + progress * 14, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // 进度文字
-  ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,.55)";
-  ctx.beginPath();
-  ctx.roundRect(x - 28, y + 14, 56, 18, 9);
-  ctx.fill();
-  ctx.fillStyle = progress >= 1 ? "#ffe066" : "#fff3d4";
-  ctx.font = "800 12px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(progress >= 1 ? "可收获" : `${Math.round(progress * 100)}%`, x, y + 27);
-  ctx.restore();
-}
-
-function drawBuildingLabels(camera) {
-  buildings.forEach((building) => {
-    const x = building.x - camera.x;
-    const y = building.y - camera.y;
-    if (x < -100 || x > canvas.width + 100 || y < -60 || y > canvas.height + 60) return;
-    ctx.save();
-    ctx.fillStyle = "rgba(10,24,19,.7)";
-    ctx.beginPath();
-    ctx.roundRect(x - 56, y - 14, 112, 28, 14);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,.18)";
-    ctx.stroke();
-    ctx.fillStyle = "#fff3d4";
-    ctx.font = "800 13px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(building.name, x, y + 1);
-    ctx.restore();
-  });
-}
-
-function drawPlayer(player, camera, isSelf) {
-  const x = player.x - camera.x;
-  const y = player.y - camera.y;
-
-  // 投影
-  ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,.32)";
-  ctx.beginPath();
-  ctx.ellipse(x, y + 18, 26, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // 身体光晕（自己）
-  if (isSelf) {
-    const grad = ctx.createRadialGradient(x, y - 30, 6, x, y - 30, 64);
-    grad.addColorStop(0, "rgba(255, 232, 130, .35)");
-    grad.addColorStop(1, "rgba(255, 232, 130, 0)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(x - 64, y - 90, 128, 128);
-  }
-
-  const sprite = ASSET.farmer;
-  const targetH = 110;
-  const aspect = sprite.ready ? sprite.image.width / sprite.image.height : 0.85;
-  const targetW = targetH * aspect;
-
-  ctx.save();
-  ctx.translate(x, y - 12);
-  ctx.scale((player.facing || 1) * 1, 1);
-  if (sprite.ready) {
-    ctx.drawImage(sprite.image, -targetW / 2, -targetH * 0.92, targetW, targetH);
-  } else {
-    ctx.fillStyle = player.color || "#55d37b";
-    ctx.beginPath();
-    ctx.roundRect(-18, -targetH * 0.9, 36, targetH * 0.7, 12);
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // 名字气泡
-  ctx.save();
-  ctx.fillStyle = isSelf ? "rgba(255,206,84,.94)" : "rgba(15, 24, 30, .82)";
-  ctx.beginPath();
-  ctx.roundRect(x - 50, y - targetH - 12, 100, 22, 11);
-  ctx.fill();
-  ctx.fillStyle = isSelf ? "#1a1408" : "#fff3d4";
-  ctx.font = "800 12px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(isSelf ? `${player.name}（你）` : player.name, x, y - targetH);
-  ctx.restore();
-}
-
-function drawPointer(camera) {
-  const target = getNearestPlot();
-  if (!target || target.dist > 100) return;
-  const plot = target.plot;
-  const x = plot.x - camera.x;
-  const y = plot.y - camera.y;
-  const t = (now() % 1200) / 1200;
-  ctx.save();
-  ctx.strokeStyle = `rgba(255, 230, 120, ${0.55 + Math.sin(t * Math.PI * 2) * 0.25})`;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([8, 8]);
-  ctx.beginPath();
-  ctx.ellipse(x, y, 60, 30, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawLog() {
-  const entries = (game.log || []).slice(0, 4);
-  if (!entries.length) return;
-  ctx.save();
-  ctx.globalAlpha = 0.86;
-  ctx.fillStyle = "rgba(8, 20, 15, .55)";
-  ctx.beginPath();
-  ctx.roundRect(18, 126, 330, 88, 18);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,243,212,.86)";
-  ctx.font = "700 13px sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-  entries.forEach((entry, i) => ctx.fillText(entry.message, 34, 152 + i * 18));
-  ctx.restore();
-}
-
-function drawMiniMap(camera) {
-  const w = 152;
-  const h = 86;
-  const x = canvas.width - w - 18;
-  const y = canvas.height - h - 18;
-  ctx.save();
-  ctx.fillStyle = "rgba(8,20,15,.65)";
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, 14);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,.2)";
-  ctx.stroke();
-
-  // mini world map
-  if (ASSET.worldMap.ready) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(x + 4, y + 4, w - 8, h - 8, 10);
-    ctx.clip();
-    ctx.globalAlpha = 0.85;
-    ctx.drawImage(ASSET.worldMap.image, x + 4, y + 4, w - 8, h - 8);
-    ctx.restore();
-  }
-
-  // 建筑点
-  ctx.fillStyle = "rgba(255,255,255,.82)";
-  buildings.forEach((building) => {
-    ctx.fillRect(x + 4 + (building.x / WORLD_WIDTH) * (w - 8) - 1.5, y + 4 + (building.y / WORLD_HEIGHT) * (h - 8) - 1.5, 3, 3);
-  });
-
-  // 视野框
-  ctx.strokeStyle = "rgba(255, 224, 130, .9)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x + 4 + (camera.x / WORLD_WIDTH) * (w - 8), y + 4 + (camera.y / WORLD_HEIGHT) * (h - 8), (canvas.width / WORLD_WIDTH) * (w - 8), (canvas.height / WORLD_HEIGHT) * (h - 8));
-
-  // 玩家
-  ctx.fillStyle = "#55d37b";
-  ctx.beginPath();
-  ctx.arc(x + 4 + (game.player.x / WORLD_WIDTH) * (w - 8), y + 4 + (game.player.y / WORLD_HEIGHT) * (h - 8), 3.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
 function renderChat() {
   if (!ui.chatMessages || ui.chatPanel.classList.contains("hidden")) return;
   const messages = (game.chat || []).slice(-18);
-  const signature = messages.map((message) => message.id).join("|");
-  if (signature === lastChatSignature) return;
-  lastChatSignature = signature;
+  const sig = messages.map((m) => m.id).join("|");
+  if (sig === lastChatSignature) return;
+  lastChatSignature = sig;
   ui.chatMessages.innerHTML = "";
   if (!messages.length) {
     const empty = document.createElement("div");
@@ -686,13 +1253,13 @@ function renderChat() {
     ui.chatMessages.appendChild(empty);
     return;
   }
-  messages.forEach((message) => {
+  messages.forEach((m) => {
     const line = document.createElement("div");
     line.className = "chat-line";
     const name = document.createElement("strong");
-    name.textContent = message.name || "玩家";
+    name.textContent = m.name || "玩家";
     line.appendChild(name);
-    line.append(document.createTextNode(message.text || ""));
+    line.append(document.createTextNode(m.text || ""));
     ui.chatMessages.appendChild(line);
   });
   ui.chatMessages.scrollTop = ui.chatMessages.scrollHeight;
@@ -701,74 +1268,72 @@ function renderChat() {
 function sendChat(text) {
   const clean = text.trim().replace(/\s+/g, " ").slice(0, 60);
   if (!clean) return;
-  game.chat = [
-    ...(game.chat || []),
-    {
-      id: `${game.player.id}-${now()}`,
-      playerId: game.player.id,
-      name: game.player.name,
-      text: clean,
-      t: now(),
-    },
-  ].slice(-60);
+  game.chat = [...(game.chat || []), {
+    id: `${game.player.id}-${now()}`,
+    playerId: game.player.id,
+    name: game.player.name,
+    text: clean,
+    t: now(),
+  }].slice(-60);
   addLog(`${game.player.name}：${clean}`);
   renderChat();
   saveLocal();
+  Sfx.play("ui");
   if (backendReady()) pushToGithub(true);
 }
 
-function updateHud() {
-  ui.coin.textContent = Math.floor(game.coins);
-  ui.level.textContent = game.level;
-  ui.water.textContent = Math.floor(game.water);
-  ui.room.textContent = game.room;
-}
-
-// roundRect polyfill (Safari 旧版本兼容)
-if (!CanvasRenderingContext2D.prototype.roundRect) {
-  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
-    const radius = Math.min(r, Math.min(w, h) / 2);
-    this.moveTo(x + radius, y);
-    this.arcTo(x + w, y, x + w, y + h, radius);
-    this.arcTo(x + w, y + h, x, y + h, radius);
-    this.arcTo(x, y + h, x, y, radius);
-    this.arcTo(x, y, x + w, y, radius);
-    this.closePath();
-    return this;
+// ---------- 音频系统 ----------
+const Sfx = (() => {
+  let ctxA;
+  const ensure = () => {
+    if (!ctxA) ctxA = new (window.AudioContext || window.webkitAudioContext)();
+    return ctxA;
   };
-}
-
-function gameLoop(time) {
-  const delta = Math.min(0.033, (time - lastTime) / 1000);
-  lastTime = time;
-  update(delta);
-  draw();
-  requestAnimationFrame(gameLoop);
-}
-
-function setMove(direction, pressed) {
-  input[direction] = pressed;
-}
-
-function bindHold(button, direction) {
-  const el = $(button);
-  if (!el) return;
-  const down = (event) => {
-    event.preventDefault();
-    setMove(direction, true);
+  const beep = (freq, dur, type = "square", vol = 0.06) => {
+    try {
+      const a = ensure();
+      const o = a.createOscillator();
+      const g = a.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, a.currentTime);
+      g.gain.setValueAtTime(vol, a.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+      o.connect(g).connect(a.destination);
+      o.start();
+      o.stop(a.currentTime + dur);
+    } catch {}
   };
-  const up = () => setMove(direction, false);
-  el.addEventListener("pointerdown", down);
-  el.addEventListener("pointerup", up);
-  el.addEventListener("pointercancel", up);
-  el.addEventListener("pointerleave", up);
-}
+  const noise = (dur, vol = 0.06) => {
+    try {
+      const a = ensure();
+      const buffer = a.createBuffer(1, a.sampleRate * dur, a.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i += 1) data[i] = (Math.random() - 0.5) * Math.exp(-i / data.length * 4);
+      const src = a.createBufferSource();
+      src.buffer = buffer;
+      const g = a.createGain();
+      g.gain.setValueAtTime(vol, a.currentTime);
+      src.connect(g).connect(a.destination);
+      src.start();
+    } catch {}
+  };
+  return {
+    play(name) {
+      switch (name) {
+        case "plant": beep(660, 0.08); setTimeout(() => beep(880, 0.08), 80); break;
+        case "water": noise(0.25, 0.04); break;
+        case "harvest": beep(880, 0.06); setTimeout(() => beep(1320, 0.08), 60); setTimeout(() => beep(1760, 0.1), 120); break;
+        case "expand": beep(220, 0.18, "sawtooth", 0.05); break;
+        case "ui": beep(1200, 0.04, "square", 0.04); break;
+        case "step": noise(0.05, 0.025); break;
+        default: break;
+      }
+    },
+    resume() { try { ensure().resume(); } catch {} },
+  };
+})();
 
-function resizeCanvas() {
-  canvas.width = BASE_WIDTH;
-  canvas.height = BASE_HEIGHT;
-}
-
+// ---------- GitHub 后端 ----------
 function readBackendConfig() {
   return {
     owner: $("#ghOwner").value.trim(),
@@ -777,62 +1342,40 @@ function readBackendConfig() {
     token: $("#ghToken").value.trim(),
   };
 }
-
 function getBackendConfig() {
   return JSON.parse(localStorage.getItem("cloudFarmBackend") || "{}");
 }
-
 function backendReady() {
-  const config = getBackendConfig();
-  return Boolean(config.owner && config.repo && config.branch && config.token);
+  const c = getBackendConfig();
+  return Boolean(c.owner && c.repo && c.branch && c.token);
 }
-
-function roomPath() {
-  return `rooms/${encodeURIComponent(game.room)}.json`;
-}
+function roomPath() { return `rooms/${encodeURIComponent(game.room)}.json`; }
 
 async function githubRequest(path, options = {}) {
-  const config = getBackendConfig();
-  const response = await fetch(`https://api.github.com/repos/${config.owner}/${config.repo}/contents/${path}`, {
+  const c = getBackendConfig();
+  const r = await fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`, {
     ...options,
     headers: {
       Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${config.token}`,
+      Authorization: `Bearer ${c.token}`,
       "X-GitHub-Api-Version": "2022-11-28",
       ...(options.headers || {}),
     },
   });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`GitHub 请求失败：${response.status} ${text}`);
-  }
-  return response.json();
+  if (!r.ok) throw new Error(`GitHub 请求失败：${r.status} ${await r.text()}`);
+  return r.json();
 }
-
-function encodeBase64Unicode(value) {
-  return btoa(unescape(encodeURIComponent(value)));
-}
-
-function decodeBase64Unicode(value) {
-  return decodeURIComponent(escape(atob(value.replace(/\n/g, ""))));
-}
-
+function encodeBase64Unicode(v) { return btoa(unescape(encodeURIComponent(v))); }
+function decodeBase64Unicode(v) { return decodeURIComponent(escape(atob(v.replace(/\n/g, "")))); }
 function publicState() {
   const clone = JSON.parse(JSON.stringify(game));
-  clone.visitors = {
-    ...(clone.visitors || {}),
-    [game.player.id]: game.player,
-  };
+  clone.visitors = { ...(clone.visitors || {}), [game.player.id]: game.player };
   clone.chat = (clone.chat || []).slice(-60);
   clone.updatedAt = now();
   return clone;
 }
-
 async function pullFromGithub(silent = false) {
-  if (!backendReady()) {
-    if (!silent) showToast("请先配置 GitHub 后端", "bad");
-    return false;
-  }
+  if (!backendReady()) { if (!silent) showToast("请先配置 GitHub 后端", "bad"); return false; }
   try {
     ui.sync.textContent = "正在拉取云端房间...";
     const file = await githubRequest(roomPath());
@@ -842,83 +1385,60 @@ async function pullFromGithub(silent = false) {
     ui.sync.textContent = "已从 GitHub 拉取";
     if (!silent) showToast("已同步云端房间");
     return file.sha;
-  } catch (error) {
-    if (String(error.message).includes("404")) {
-      ui.sync.textContent = "云端暂无房间，等待创建";
-      return null;
-    }
+  } catch (e) {
+    if (String(e.message).includes("404")) { ui.sync.textContent = "云端暂无房间，等待创建"; return null; }
     ui.sync.textContent = "同步失败";
     if (!silent) showToast("GitHub 同步失败，请检查仓库权限", "bad");
     return false;
   }
 }
-
 function mergeRemote(remote) {
   const localPlayer = game.player;
-  const remotePlots = new Map(remote.plots.map((plot) => [plot.id, plot]));
+  const map = new Map(remote.plots.map((p) => [p.id, p]));
   game = {
-    ...game,
-    ...remote,
+    ...game, ...remote,
     coins: Math.max(game.coins, remote.coins || 0),
     xp: Math.max(game.xp, remote.xp || 0),
     level: Math.max(game.level, remote.level || 1),
     water: Math.max(game.water, remote.water || 0),
     chat: mergeChat(game.chat || [], remote.chat || []),
-    plots: game.plots.map((plot) => {
-      const remotePlot = remotePlots.get(plot.id);
-      if (!remotePlot) return plot;
-      if ((remotePlot.plantedAt || 0) > (plot.plantedAt || 0) || remotePlot.crop !== plot.crop) return remotePlot;
-      return { ...remotePlot, ...plot, harvests: Math.max(plot.harvests || 0, remotePlot.harvests || 0) };
+    plots: game.plots.map((p) => {
+      const r = map.get(p.id); if (!r) return p;
+      if ((r.plantedAt || 0) > (p.plantedAt || 0) || r.crop !== p.crop) return r;
+      return { ...r, ...p, harvests: Math.max(p.harvests || 0, r.harvests || 0) };
     }),
-    visitors: {
-      ...(remote.visitors || {}),
-      [localPlayer.id]: localPlayer,
-    },
+    visitors: { ...(remote.visitors || {}), [localPlayer.id]: localPlayer },
     player: localPlayer,
   };
 }
-
-function mergeChat(localChat, remoteChat) {
-  const map = new Map();
-  [...remoteChat, ...localChat].forEach((message) => {
-    if (!message?.id) return;
-    map.set(message.id, message);
-  });
-  return [...map.values()].sort((a, b) => (a.t || 0) - (b.t || 0)).slice(-60);
+function mergeChat(a, b) {
+  const m = new Map();
+  [...b, ...a].forEach((x) => { if (x?.id) m.set(x.id, x); });
+  return [...m.values()].sort((a, b) => (a.t || 0) - (b.t || 0)).slice(-60);
 }
-
 async function pushToGithub(silent = false) {
-  if (!backendReady()) {
-    if (!silent) showToast("当前是本地模式，未配置 GitHub Token", "bad");
-    return;
-  }
+  if (!backendReady()) { if (!silent) showToast("当前是本地模式", "bad"); return; }
   try {
     ui.sync.textContent = "正在推送到 GitHub...";
     const sha = await pullFromGithub(true);
-    const config = getBackendConfig();
-    const body = {
-      message: `sync cloud farm room ${game.room}`,
-      content: encodeBase64Unicode(JSON.stringify(publicState(), null, 2)),
-      branch: config.branch,
-      ...(sha ? { sha } : {}),
-    };
+    const c = getBackendConfig();
     await githubRequest(roomPath(), {
       method: "PUT",
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        message: `sync cloud farm room ${game.room}`,
+        content: encodeBase64Unicode(JSON.stringify(publicState(), null, 2)),
+        branch: c.branch, ...(sha ? { sha } : {}),
+      }),
     });
     ui.sync.textContent = `GitHub 已同步 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
     if (!silent) showToast("云端同步完成");
-  } catch (error) {
+  } catch {
     ui.sync.textContent = "同步失败";
-    if (!silent) showToast("推送失败：请检查 Token 是否有仓库 contents 读写权限", "bad");
+    if (!silent) showToast("推送失败：请检查 Token 权限", "bad");
   }
 }
 
-async function backgroundSync() {
-  saveLocal();
-  if (backendReady()) await pushToGithub(true);
-}
-
+// ---------- 启动 ----------
 function startGame() {
   const name = $("#playerName").value.trim() || "菜园主";
   const room = ($("#roomCode").value.trim() || "PUBLIC-FARM").toUpperCase();
@@ -929,33 +1449,41 @@ function startGame() {
   game.player.id = getClientId();
   game.player.lastSeen = now();
   if (!game.chat?.length) {
-    game.chat = [
-      {
-        id: `system-${now()}`,
-        playerId: "system",
-        name: "系统",
-        text: "欢迎来到星之菜园，所有玩家默认在这片大地图相遇。",
-        t: now(),
-      },
-    ];
+    game.chat = [{ id: `system-${now()}`, playerId: "system", name: "系统", text: "欢迎来到星之菜园！", t: now() }];
   }
   startScreen.classList.remove("active");
   gameScreen.classList.remove("hidden");
   ui.sync.textContent = backendReady() ? "GitHub 后端已就绪" : "本地模式";
   addLog(`${name} 进入了村庄`);
+  renderCropBar();
   saveLocal();
+  Sfx.resume();
   if (backendReady()) pushToGithub(true);
 }
 
-function initBackendForm() {
-  $("#ghOwner").value = savedBackend.owner || "magao520";
-  $("#ghRepo").value = savedBackend.repo || "";
-  $("#ghBranch").value = savedBackend.branch || "main";
-  $("#ghToken").value = savedBackend.token || "";
+// ---------- 输入 ----------
+function setMove(direction, pressed) { input[direction] = pressed; }
+
+function bindHold(button, direction) {
+  const el = $(button);
+  if (!el) return;
+  const down = (e) => { e.preventDefault(); setMove(direction, true); Sfx.resume(); };
+  const up = () => setMove(direction, false);
+  el.addEventListener("pointerdown", down);
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
+  el.addEventListener("pointerleave", up);
+}
+
+function resizeCanvas() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.floor(window.innerWidth * dpr);
+  canvas.height = Math.floor(window.innerHeight * dpr);
+  ctx.imageSmoothingEnabled = false;
 }
 
 function bindEvents() {
-  $("#startGame").addEventListener("click", startGame);
+  $("#startGame").addEventListener("click", () => { Sfx.play("ui"); startGame(); });
   $("#openBackend").addEventListener("click", () => backendPanel.classList.remove("hidden"));
   $("#closeBackend").addEventListener("click", () => backendPanel.classList.add("hidden"));
   $("#saveBackend").addEventListener("click", () => {
@@ -974,8 +1502,8 @@ function bindEvents() {
     if (!ui.chatPanel.classList.contains("hidden")) ui.chatInput.focus();
   });
   $("#closeChat").addEventListener("click", () => ui.chatPanel.classList.add("hidden"));
-  $("#chatForm").addEventListener("submit", (event) => {
-    event.preventDefault();
+  $("#chatForm").addEventListener("submit", (e) => {
+    e.preventDefault();
     sendChat(ui.chatInput.value);
     ui.chatInput.value = "";
   });
@@ -984,24 +1512,68 @@ function bindEvents() {
   bindHold("#rightBtn", "right");
   bindHold("#downBtn", "down");
 
-  window.addEventListener("keydown", (event) => {
+  window.addEventListener("keydown", (e) => {
     if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
-    if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") setMove("left", true);
-    if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") setMove("right", true);
-    if (event.key === "ArrowUp" || event.key.toLowerCase() === "w") setMove("up", true);
-    if (event.key === "ArrowDown" || event.key.toLowerCase() === "s") setMove("down", true);
-    if (event.key.toLowerCase() === "j") plant();
-    if (event.key.toLowerCase() === "k") water();
-    if (event.key.toLowerCase() === "l") harvest();
-    if (event.key.toLowerCase() === "enter") $("#chatToggle").click();
+    const k = e.key.toLowerCase();
+    if (e.key === "ArrowLeft" || k === "a") setMove("left", true);
+    if (e.key === "ArrowRight" || k === "d") setMove("right", true);
+    if (e.key === "ArrowUp" || k === "w") setMove("up", true);
+    if (e.key === "ArrowDown" || k === "s") setMove("down", true);
+    if (k === "j") plant();
+    if (k === "k") water();
+    if (k === "l") harvest();
+    if (k === "u") expandFarm();
+    if (k === "enter") $("#chatToggle").click();
   });
-  window.addEventListener("keyup", (event) => {
-    if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") setMove("left", false);
-    if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") setMove("right", false);
-    if (event.key === "ArrowUp" || event.key.toLowerCase() === "w") setMove("up", false);
-    if (event.key === "ArrowDown" || event.key.toLowerCase() === "s") setMove("down", false);
+  window.addEventListener("keyup", (e) => {
+    const k = e.key.toLowerCase();
+    if (e.key === "ArrowLeft" || k === "a") setMove("left", false);
+    if (e.key === "ArrowRight" || k === "d") setMove("right", false);
+    if (e.key === "ArrowUp" || k === "w") setMove("up", false);
+    if (e.key === "ArrowDown" || k === "s") setMove("down", false);
   });
   window.addEventListener("resize", resizeCanvas);
+  window.addEventListener("orientationchange", resizeCanvas);
+
+  // 手柄
+  window.addEventListener("gamepadconnected", () => showToast("手柄已连接"));
+}
+
+function readGamepad() {
+  if (!navigator.getGamepads) return;
+  const gps = navigator.getGamepads();
+  for (const g of gps) {
+    if (!g) continue;
+    const ax = g.axes[0] || 0, ay = g.axes[1] || 0;
+    setMove("left", ax < -0.3); setMove("right", ax > 0.3);
+    setMove("up", ay < -0.3); setMove("down", ay > 0.3);
+    if (g.buttons[0]?.pressed) plant();
+    if (g.buttons[1]?.pressed) water();
+    if (g.buttons[2]?.pressed) harvest();
+    if (g.buttons[3]?.pressed) expandFarm();
+    return;
+  }
+}
+
+function initBackendForm() {
+  $("#ghOwner").value = savedBackend.owner || "magao520";
+  $("#ghRepo").value = savedBackend.repo || "";
+  $("#ghBranch").value = savedBackend.branch || "main";
+  $("#ghToken").value = savedBackend.token || "";
+}
+
+// ---------- 主循环 ----------
+function gameLoop(time) {
+  const delta = (time - lastTime) / 1000;
+  lastTime = time;
+  accumulator += Math.min(delta, 0.25);
+  while (accumulator >= FIXED_DT) {
+    update(FIXED_DT);
+    readGamepad();
+    accumulator -= FIXED_DT;
+  }
+  render();
+  requestAnimationFrame(gameLoop);
 }
 
 function registerServiceWorker() {
@@ -1012,10 +1584,14 @@ function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    navigator.serviceWorker.register("./sw.js").then((registration) => registration.update()).catch(() => {});
+    navigator.serviceWorker.register("./sw.js").then((r) => r.update()).catch(() => {});
   }
 }
 
+// ---------- 初始化 ----------
+buildAssets();
+buildLevel();
+applyBuildingCollisions();
 initBackendForm();
 renderCropBar();
 resizeCanvas();
