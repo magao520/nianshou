@@ -1,11 +1,12 @@
-const CACHE_NAME = "cloud-farm-v15";
+const CACHE_NAME = "survival-3d-v1";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=14",
-  "./src/styles.css?v=14",
-  "./src/game.js?v=14",
+  "./manifest.webmanifest?v=15",
+  "./src/styles.css?v=15",
+  "./src/game.js?v=15",
   "./assets/icon.svg",
+  "./assets/vendor/three.module.js",
   "./assets/vendor/ASSET_CREDITS.md",
   "./assets/vendor/KENNEY_CC0_LICENSE.txt",
 ];

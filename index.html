@@ -3,19 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#13251d" />
-    <title>星之菜园 · 1D 田园 RPG</title>
+    <meta name="theme-color" content="#101820" />
+    <title>原始方舟 · 3D 恐龙生存</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=14" />
-    <link rel="stylesheet" href="./src/styles.css?v=14" />
+    <link rel="manifest" href="./manifest.webmanifest?v=15" />
+    <link rel="stylesheet" href="./src/styles.css?v=15" />
   </head>
   <body>
     <main id="app">
       <section id="startScreen" class="screen active">
         <div class="hero-card">
-          <p class="eyebrow">1D 横向田园生活 RPG 原型</p>
-          <h1>星之菜园</h1>
-          <p class="subtitle">只沿一条路左右移动：农舍、田地、种子店、出货箱、池塘和矿洞全都排成一线。</p>
+          <p class="eyebrow">3D 恐龙荒岛生存原型</p>
+          <h1>原始方舟</h1>
+          <p class="subtitle">采集木材和石头，喝水进食，建造营火和地基，躲避或击退游荡的恐龙，在荒岛上活下去。</p>
           <div class="start-grid">
             <label>
               玩家昵称
@@ -30,7 +30,7 @@
             <button id="startGame" class="primary">开始游戏</button>
             <button id="openBackend" class="ghost">GitHub 后端设置</button>
           </div>
-          <p class="note">默认进入公共大地图。没有配置 GitHub Token 时可本地体验；配置后所有玩家会同步到同一张地图。</p>
+          <p class="note">原创 3D 生存原型，不使用《方舟：生存进化》的受版权素材、模型或名称。键盘 WASD 移动，鼠标拖动转向，手机用摇杆。</p>
         </div>
       </section>
 
@@ -53,28 +53,28 @@
       <section id="gameScreen" class="game-shell hidden">
         <canvas id="gameCanvas" width="960" height="540" aria-label="游戏画布"></canvas>
         <div class="hud top">
-          <div class="stat"><span>金币</span><strong id="coinText">0</strong></div>
+          <div class="stat"><span>生命</span><strong id="coinText">100</strong></div>
           <div class="stat"><span>等级</span><strong id="levelText">1</strong></div>
           <div class="stat"><span>体力</span><strong id="energyText">100</strong></div>
-          <div class="stat"><span>日期</span><strong id="dateText">春1</strong></div>
-          <div class="stat"><span>地图</span><strong id="roomText">公共</strong></div>
+          <div class="stat"><span>饥渴</span><strong id="dateText">100/100</strong></div>
+          <div class="stat"><span>威胁</span><strong id="roomText">低</strong></div>
         </div>
         <div class="hud sync">
           <button id="bagBtn" class="mini">背包</button>
-          <button id="questBtn" class="mini">任务</button>
-          <button id="sleepBtn" class="mini">睡觉</button>
-          <button id="chatToggle" class="mini">公屏</button>
-          <button id="syncNow" class="mini">同步</button>
+          <button id="questBtn" class="mini">制作</button>
+          <button id="sleepBtn" class="mini">营火</button>
+          <button id="chatToggle" class="mini">日志</button>
+          <button id="syncNow" class="mini">保存</button>
           <span id="syncStatus">本地模式</span>
         </div>
         <aside id="chatPanel" class="chat-panel hidden">
           <header>
-            <strong>世界公屏</strong>
+            <strong>生存日志</strong>
             <button id="closeChat" aria-label="关闭公屏">×</button>
           </header>
           <div id="chatMessages" class="chat-messages"></div>
           <form id="chatForm" class="chat-form">
-            <input id="chatInput" maxlength="60" placeholder="和大家说句话..." />
+            <input id="chatInput" maxlength="60" placeholder="记录一句生存笔记..." />
             <button type="submit">发送</button>
           </form>
         </aside>
@@ -86,10 +86,10 @@
             <div class="joystick-stick" id="joystickStick"></div>
           </div>
           <div class="action-pad">
-            <button id="plantBtn"><span>🌱</span>播种</button>
-            <button id="waterBtn"><span>💧</span>浇水</button>
-            <button id="harvestBtn"><span>🧺</span>收获</button>
-            <button id="shopBtn"><span>💬</span>交互</button>
+            <button id="plantBtn"><span>🪓</span>采集</button>
+            <button id="waterBtn"><span>💧</span>饮水</button>
+            <button id="harvestBtn"><span>🗡</span>攻击</button>
+            <button id="shopBtn"><span>⛺</span>建造</button>
           </div>
         </div>
         <section id="rpgPanel" class="rpg-panel hidden">
@@ -104,6 +104,6 @@
 
       <section id="rotateTip" class="rotate-tip" aria-hidden="true"></section>
     </main>
-    <script type="module" src="./src/game.js?v=14"></script>
+    <script type="module" src="./src/game.js?v=15"></script>
   </body>
 </html>

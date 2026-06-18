@@ -220,14 +220,12 @@ button:active {
 
 .game-shell {
   display: block;
-  width: min(100vw, calc(100vh * 9 / 16));
-  height: min(100vh, calc(100vw * 16 / 9));
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
-  background: #102017;
-  box-shadow: 0 0 0 999px #07120f;
+  background: #0b1118;
+  box-shadow: none;
 }
 
 .game-shell::after {
@@ -245,9 +243,7 @@ canvas {
   width: 100%;
   height: 100%;
   display: block;
-  image-rendering: pixelated;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: crisp-edges;
+  image-rendering: auto;
 }
 
 .hud {
@@ -323,6 +319,20 @@ canvas {
   gap: 5px;
   transform: translateX(-50%);
   transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.game-shell .crop-bar:empty {
+  display: none;
+}
+
+.game-shell.damage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background: radial-gradient(circle, transparent 35%, rgba(255, 0, 0, 0.36));
+  animation: damagePulse 0.18s ease-out both;
 }
 
 .crop-bar.collapsed {
@@ -742,5 +752,14 @@ canvas {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes damagePulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
