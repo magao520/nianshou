@@ -90,6 +90,7 @@ buf.width = VIEW_W;
 buf.height = VIEW_H;
 const bx = buf.getContext("2d");
 bx.imageSmoothingEnabled = false;
+let worldBackdrop = null;
 
 // ---------- 像素工具 ----------
 function makeCanvas(w, h) {
@@ -774,6 +775,89 @@ function setTile(arr, x, y, v) {
   arr[y * MAP_W + x] = v;
 }
 
+function buildWorldBackdrop() {
+  const layer = makeCanvas(WORLD_W, WORLD_H);
+  const g = layer.x;
+  const sky = g.createLinearGradient(0, 0, WORLD_W, WORLD_H);
+  sky.addColorStop(0, "#74c94a");
+  sky.addColorStop(0.55, "#4ea53a");
+  sky.addColorStop(1, "#2f7836");
+  g.fillStyle = sky;
+  g.fillRect(0, 0, WORLD_W, WORLD_H);
+
+  // 手绘式草地噪点：一次性生成整张地图，不再像重复贴图。
+  for (let i = 0; i < 9000; i += 1) {
+    const x = (i * 73 + i * i * 17) % WORLD_W;
+    const y = (i * 47 + i * i * 29) % WORLD_H;
+    const tone = (x * 11 + y * 7 + i) % 6;
+    g.fillStyle = tone < 2 ? "rgba(35,112,44,.22)" : tone < 4 ? "rgba(132,211,91,.16)" : "rgba(255,255,255,.07)";
+    g.fillRect(x, y, tone < 4 ? 1 : 2, 1);
+  }
+
+  // 大块明暗草地区域，让画面像一张场景而不是贴图平铺。
+  const blobs = [
+    { x: 150, y: 110, r: 170, c: "rgba(126,207,85,.18)" },
+    { x: 780, y: 95, r: 210, c: "rgba(255,230,130,.10)" },
+    { x: 835, y: 520, r: 230, c: "rgba(21,78,44,.20)" },
+    { x: 270, y: 510, r: 240, c: "rgba(23,86,42,.16)" },
+  ];
+  blobs.forEach((b) => {
+    const grad = g.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+    grad.addColorStop(0, b.c);
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = grad;
+    g.fillRect(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
+  });
+
+  // 连续道路，不再按格子贴。
+  g.lineCap = "round";
+  g.lineJoin = "round";
+  g.strokeStyle = "#8d6f4a";
+  g.lineWidth = 26;
+  g.beginPath();
+  g.moveTo(30, 22 * TILE + 8);
+  g.bezierCurveTo(270, 22 * TILE - 18, 520, 22 * TILE + 30, WORLD_W - 30, 22 * TILE + 8);
+  g.stroke();
+  g.strokeStyle = "#c4a679";
+  g.lineWidth = 20;
+  g.stroke();
+  g.strokeStyle = "rgba(255,238,183,.18)";
+  g.lineWidth = 2;
+  for (let x = 60; x < WORLD_W; x += 44) {
+    g.beginPath();
+    g.moveTo(x, 22 * TILE);
+    g.lineTo(x + 18, 22 * TILE + 6);
+    g.stroke();
+  }
+  g.strokeStyle = "#8d6f4a";
+  g.lineWidth = 24;
+  g.beginPath();
+  g.moveTo(28 * TILE + 8, 65);
+  g.bezierCurveTo(28 * TILE - 20, 210, 28 * TILE + 34, 440, 28 * TILE + 8, WORLD_H - 70);
+  g.stroke();
+  g.strokeStyle = "#c4a679";
+  g.lineWidth = 18;
+  g.stroke();
+
+  // 池塘
+  const pond = g.createRadialGradient(48 * TILE, 30 * TILE, 10, 48 * TILE, 30 * TILE, 90);
+  pond.addColorStop(0, "#66d7ff");
+  pond.addColorStop(0.62, "#2d9bd4");
+  pond.addColorStop(1, "#1b5f8f");
+  g.fillStyle = pond;
+  g.beginPath();
+  g.ellipse(48 * TILE, 30 * TILE, 74, 45, -0.08, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = "rgba(230,244,219,.55)";
+  g.lineWidth = 4;
+  g.stroke();
+  g.fillStyle = "rgba(255,255,255,.35)";
+  g.fillRect(48 * TILE - 25, 30 * TILE - 14, 22, 2);
+  g.fillRect(48 * TILE + 18, 30 * TILE + 9, 28, 2);
+
+  worldBackdrop = layer.c;
+}
+
 // ---------- 建筑实体 ----------
 const buildingDefs = [
   { id: "home",       name: "玩家小屋", sprite: 0, x: 8 * TILE,   y: 8 * TILE,  w: 64, h: 56 },
@@ -844,6 +928,7 @@ let actionFlash = 0;
 let lastGamepadButtons = new Set();
 let camera = { x: 0, y: 0 };
 let moveTarget = null;
+let selectedPlotId = null;
 
 function createInitialState() {
   return {
@@ -1006,6 +1091,14 @@ function moveWithCollision(p, dx, dy) {
 // ---------- 农事动作 ----------
 function getNearestPlot() {
   const px = game.player.x, py = game.player.y;
+  if (selectedPlotId) {
+    const selected = game.plots.find((p) => p.id === selectedPlotId);
+    if (selected && !selected.locked) {
+      const sx = selected.tx * TILE + TILE / 2;
+      const sy = selected.ty * TILE + TILE / 2;
+      return { plot: selected, dist: Math.hypot(sx - px, sy - py) };
+    }
+  }
   let best = null, bestD = Infinity;
   game.plots.forEach((p) => {
     if (p.locked) return;
@@ -1149,22 +1242,8 @@ function render() {
 }
 
 function drawTiles(cam) {
-  const tx0 = Math.max(0, Math.floor(cam.x / TILE));
-  const ty0 = Math.max(0, Math.floor(cam.y / TILE));
-  const tx1 = Math.min(MAP_W - 1, Math.ceil((cam.x + VIEW_W) / TILE));
-  const ty1 = Math.min(MAP_H - 1, Math.ceil((cam.y + VIEW_H) / TILE));
-  const waterFrame = Math.floor((Date.now() / 500) % 2);
-  for (let y = ty0; y <= ty1; y += 1) {
-    for (let x = tx0; x <= tx1; x += 1) {
-      let g = groundMap[y * MAP_W + x];
-      if (g === 4 || g === 5) g = waterFrame === 0 ? 4 : 5;
-      bx.drawImage(SPRITES.tiles, g * TILE, 0, TILE, TILE, x * TILE - cam.x, y * TILE - cam.y, TILE, TILE);
-      const o = overlayMap[y * MAP_W + x];
-      if (o >= 0) {
-        bx.drawImage(SPRITES.tiles, o * TILE, 0, TILE, TILE, x * TILE - cam.x, y * TILE - cam.y, TILE, TILE);
-      }
-    }
-  }
+  if (!worldBackdrop) buildWorldBackdrop();
+  bx.drawImage(worldBackdrop, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
 }
 
 function drawBuildings(cam) {
@@ -1248,18 +1327,31 @@ function drawPlots(cam) {
     const py = p.ty * TILE - cam.y;
     if (px < -16 || px > VIEW_W || py < -16 || py > VIEW_H) return;
     if (p.locked) {
-      bx.fillStyle = "rgba(0,0,0,0.45)";
-      bx.fillRect(px, py, TILE, TILE);
-      bx.strokeStyle = "rgba(255,255,255,0.4)";
-      bx.setLineDash([2, 2]);
-      bx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
-      bx.setLineDash([]);
+      drawPlotPatch(px, py, "rgba(63,43,24,.72)", "rgba(255,255,255,.28)", true);
       return;
     }
     const moist = clamp(p.moisture || 0, 0, 100) / 100;
-    const tile = moist > 0.15 ? 7 : 6;
-    bx.drawImage(SPRITES.tiles, tile * TILE, 0, TILE, TILE, px, py, TILE, TILE);
+    drawPlotPatch(px, py, moist > 0.15 ? PAL.soilWet : PAL.soilDry, moist > 0.15 ? "#7dc8ff" : PAL.soilEdge, false);
+    if (p.id === selectedPlotId) {
+      bx.strokeStyle = "#fff3a7";
+      bx.lineWidth = 2;
+      bx.strokeRect(px - 2, py - 2, TILE + 4, TILE + 4);
+    }
   });
+}
+
+function drawPlotPatch(px, py, fill, edge, dashed) {
+  bx.fillStyle = "rgba(0,0,0,.18)";
+  bx.fillRect(px + 2, py + 12, TILE, 3);
+  bx.fillStyle = fill;
+  bx.fillRect(px, py, TILE, TILE);
+  bx.fillStyle = "rgba(255,230,170,.16)";
+  bx.fillRect(px + 2, py + 3, TILE - 4, 1);
+  bx.fillRect(px + 2, py + 8, TILE - 4, 1);
+  bx.strokeStyle = edge;
+  if (dashed) bx.setLineDash([2, 2]);
+  bx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
+  bx.setLineDash([]);
 }
 
 function drawCrops(cam) {
@@ -1309,13 +1401,13 @@ function drawPlayer(p, cam, isSelf) {
 
 function drawHover(cam) {
   const t = getNearestPlot();
-  if (!t || t.dist > 28) return;
+  if (!t || (!selectedPlotId && t.dist > 28)) return;
   const px = t.plot.tx * TILE - cam.x;
   const py = t.plot.ty * TILE - cam.y;
   const blink = Math.floor(Date.now() / 200) % 2 === 0;
   bx.strokeStyle = blink ? "#ffe066" : "#fff3a7";
-  bx.lineWidth = 1;
-  bx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
+  bx.lineWidth = selectedPlotId ? 2 : 1;
+  bx.strokeRect(px - 1, py - 1, TILE + 2, TILE + 2);
   if (actionFlash > 0) {
     bx.fillStyle = `rgba(255, 255, 255, ${actionFlash})`;
     bx.fillRect(px, py, TILE, TILE);
@@ -1662,7 +1754,7 @@ function plotAtWorld(x, y) {
   return game.plots.find((plot) => {
     const px = plot.tx * TILE;
     const py = plot.ty * TILE;
-    return x >= px && x <= px + TILE && y >= py && y <= py + TILE;
+    return x >= px - 7 && x <= px + TILE + 7 && y >= py - 7 && y <= py + TILE + 7;
   });
 }
 
@@ -1671,12 +1763,14 @@ function handleMapPointer(event) {
   const world = screenToWorld(event.clientX, event.clientY);
   const plot = plotAtWorld(world.x, world.y);
   if (plot) {
-    moveTarget = { x: plot.tx * TILE + TILE / 2, y: plot.ty * TILE + TILE + 8, plotId: plot.id };
+    selectedPlotId = plot.id;
+    moveTarget = { x: plot.tx * TILE + TILE / 2, y: plot.ty * TILE + TILE + 10, plotId: plot.id };
     if (plot.locked) showToast("这块地还没开垦，靠近后点“开垦”");
     else if (!plot.crop) showToast("正在前往空地，靠近后可播种");
     else if (getCropProgress(plot) >= 1) showToast("正在前往成熟作物，靠近后可收获");
     else showToast("正在前往作物，靠近后可浇水");
   } else {
+    selectedPlotId = null;
     moveTarget = { x: world.x, y: world.y };
   }
   Sfx.play("ui");
