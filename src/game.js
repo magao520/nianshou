@@ -30,8 +30,27 @@ const crops = {
   carrot: { name: "胡萝卜", emoji: "🥕", growMs: 30 * 60_000, seedCost: 3, sell: 9, colors: ["#86c85a", "#ff9948"] },
   tomato: { name: "番茄", emoji: "🍅", growMs: 45 * 60_000, seedCost: 5, sell: 16, colors: ["#3fa65a", "#df493d"] },
   corn: { name: "甜玉米", emoji: "🌽", growMs: 60 * 60_000, seedCost: 8, sell: 28, colors: ["#78b64c", "#ffd45b"] },
+  watermelon: { name: "西瓜", emoji: "🍉", growMs: 75 * 60_000, seedCost: 10, sell: 36, colors: ["#55b95f", "#2f9d4c"] },
   eggplant: { name: "茄子", emoji: "🍆", growMs: 90 * 60_000, seedCost: 12, sell: 42, colors: ["#4d9a5d", "#7b4bc0"] },
 };
+
+const prizes = {
+  prize_super_mutation: { name: "超级变异植物", emoji: "🌈", value: 900, tier: "特等奖" },
+  prize_rare_seed: { name: "高价值农作物种子", emoji: "💎", value: 520, tier: "特等奖" },
+  prize_gift_box: { name: "农产品礼盒", emoji: "🎁", value: 220, tier: "一等奖" },
+  prize_seed_box: { name: "普通种子盲盒", emoji: "📦", value: 80, tier: "二等奖" },
+  prize_postcard: { name: "农场文创卡", emoji: "🎨", value: 60, tier: "二等奖" },
+  prize_straw: { name: "一捆烂稻草", emoji: "🧹", value: 2, tier: "参与奖" },
+  prize_mud: { name: "一坨农业泥巴", emoji: "🟤", value: 1, tier: "参与奖" },
+  prize_broken_boot: { name: "破胶靴", emoji: "🥾", value: 3, tier: "参与奖" },
+};
+
+const lotteryPool = [
+  { tier: "特等奖", chance: 0.001, items: ["prize_super_mutation", "prize_rare_seed"] },
+  { tier: "一等奖", chance: 0.002, items: ["prize_gift_box"] },
+  { tier: "二等奖", chance: 0.002, items: ["prize_seed_box", "prize_postcard"] },
+  { tier: "参与奖", chance: 0.995, items: ["prize_straw", "prize_mud", "prize_broken_boot"] },
+];
 
 let clientId = localStorage.getItem(CLIENT_KEY);
 if (!clientId) {
@@ -51,8 +70,13 @@ let floating = [];
 let broadcast = null;
 let listingItemKey = null;
 let selectedBagKey = "";
+let bagCategory = "crops";
 let selectedListingId = "";
 let selectedPlayerId = "";
+let lotterySpinning = false;
+let lotteryReels = ["🥕", "🌽", "🍅"];
+let lotteryMessage = "10 金币摇一次，奖品会进入背包奖品页。";
+let blackjack = null;
 
 [
   ["field", "./assets/2d/kenney/farm/dirtFarmland_E.png"],
@@ -371,6 +395,7 @@ function renderSeeds() {
 
 function openPanel(panel) {
   activePanel = panel;
+  closeDrawers();
   document.querySelectorAll(".dock button").forEach((btn) => btn.classList.toggle("active", btn.dataset.panel === panel));
   if (panel === "garden") {
     sheet.classList.add("hidden");
@@ -380,19 +405,24 @@ function openPanel(panel) {
   if (panel === "bag") openBag();
   if (panel === "market") openMarket();
   if (panel === "players") openPlayers();
+  if (panel === "lottery") openLottery();
+  if (panel === "blackjack") openBlackjack();
 }
 
 function openBag() {
   sheetTitle.textContent = "背包";
-  const rows = Object.entries(player.inventory || {});
+  const rows = Object.entries(player.inventory || {}).filter(([key]) => bagCategory === "prizes" ? isPrize(key) : !isPrize(key));
   if (!rows.length) {
     selectedBagKey = "";
-    sheetBody.innerHTML = `<div class="card-row"><div><strong>背包是空的</strong><p>成熟后采摘蔬菜会进入背包。</p></div></div>`;
+    sheetBody.innerHTML = `
+      <div class="tabs"><button class="${bagCategory === "crops" ? "active" : ""}" data-bag-tab="crops">农作物</button><button class="${bagCategory === "prizes" ? "active" : ""}" data-bag-tab="prizes">奖品</button></div>
+      <div class="card-row"><div><strong>${bagCategory === "prizes" ? "奖品页是空的" : "农作物页是空的"}</strong><p>${bagCategory === "prizes" ? "摇摇乐抽到的奖品会放在这里。" : "成熟后采摘蔬菜会进入这里。"}</p></div></div>`;
     return;
   }
   if (!selectedBagKey || !player.inventory[selectedBagKey]) selectedBagKey = rows[0][0];
   const selectedQty = player.inventory[selectedBagKey] || 0;
   sheetBody.innerHTML = `
+    <div class="tabs"><button class="${bagCategory === "crops" ? "active" : ""}" data-bag-tab="crops">农作物</button><button class="${bagCategory === "prizes" ? "active" : ""}" data-bag-tab="prizes">奖品</button></div>
     <div class="two-pane">
       <div class="pane-list">
         ${rows.map(([key, qty]) => `
@@ -402,12 +432,214 @@ function openBag() {
         `).join("")}
       </div>
       <div class="pane-detail">
-        <div class="item-title"><span class="item-icon">${itemIcon(selectedBagKey)}</span><div><strong>${itemName(selectedBagKey)}</strong><p>${isMutation(selectedBagKey) ? "稀有变异蔬菜，可高价挂到集市。" : "普通蔬菜，可留存、交易或等待集市需求。"}</p></div></div>
+        <div class="item-title"><span class="item-icon">${itemIcon(selectedBagKey)}</span><div><strong>${itemName(selectedBagKey)}</strong><p>${itemDescription(selectedBagKey)}</p></div></div>
         <span class="chip">库存 ×${selectedQty}</span>
         <button class="market-action primary-action" data-open-list="${selectedBagKey}">上架</button>
       </div>
     </div>
   `;
+}
+
+function openLottery() {
+  sheetTitle.textContent = "摇摇乐";
+  sheetBody.innerHTML = `
+    <div class="lottery-layout">
+      <div class="slot-machine ${lotterySpinning ? "spinning" : ""}">
+        <div class="slot-title">云上摇摇乐</div>
+        <div class="reels">${lotteryReels.map((x) => `<span>${x}</span>`).join("")}</div>
+        <p>${lotteryMessage}</p>
+        <button class="market-action primary-action" id="spinLottery" ${lotterySpinning ? "disabled" : ""}>10 金币摇一次</button>
+      </div>
+      <div class="prize-table">
+        <div><strong>🏆 奖池</strong><span>特等奖 1/1000：超级变异植物 / 高价值种子</span></div>
+        <div><strong>一等奖</strong><span>1/500：农产品礼盒</span></div>
+        <div><strong>二等奖</strong><span>0.2%：文创 / 普通种子盲盒</span></div>
+        <div><strong>参与奖</strong><span>农业垃圾，也能进背包和上架</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function openBlackjack() {
+  sheetTitle.textContent = "老黄的二十一点";
+  if (!blackjack) blackjack = freshBlackjack();
+  sheetBody.innerHTML = renderBlackjack();
+}
+
+function rollLotteryPrize() {
+  const r = Math.random();
+  let acc = 0;
+  const tier = lotteryPool.find((x) => {
+    acc += x.chance;
+    return r <= acc;
+  }) || lotteryPool[lotteryPool.length - 1];
+  const key = tier.items[Math.floor(Math.random() * tier.items.length)];
+  return { key, tier: tier.tier, icon: itemIcon(key), name: itemName(key) };
+}
+
+function spinLottery() {
+  if (lotterySpinning) return;
+  if (player.coins < 10) return toast("金币不够，摇摇乐需要 10 金币");
+  lotterySpinning = true;
+  lotteryMessage = "老虎机转起来了...";
+  openLottery();
+  playTone("slot");
+  const icons = ["🥕", "🍅", "🌽", "🍆", "🍉", "🎁", "📦", "🌈", "🧹", "🥾"];
+  let ticks = 0;
+  const timer = setInterval(() => {
+    lotteryReels = Array.from({ length: 3 }, () => icons[Math.floor(Math.random() * icons.length)]);
+    if (activePanel === "lottery") openLottery();
+    ticks += 1;
+    if (ticks >= 12) {
+      clearInterval(timer);
+      const prize = rollLotteryPrize();
+      lotteryReels = [prize.icon, prize.icon, prize.icon];
+      commit((draft) => {
+        const p = draft.players[clientId];
+        p.coins -= 10;
+        p.inventory[prize.key] = (p.inventory[prize.key] || 0) + 1;
+        draft.events.push({ id: uid(), time: now(), text: `${p.name} 摇摇乐抽到 ${prize.name}` });
+      }, "lottery");
+      lotteryMessage = `${prize.tier}！获得 ${prize.name}，已存入背包奖品页。`;
+      lotterySpinning = false;
+      playTone(prize.tier === "参与奖" ? "trash" : "win");
+      if (activePanel === "lottery") openLottery();
+    }
+  }, 95);
+}
+
+function playTone(type) {
+  try {
+    const audio = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    const freq = type === "win" ? 720 : type === "trash" ? 180 : 380;
+    osc.type = type === "slot" ? "square" : "sine";
+    osc.frequency.setValueAtTime(freq, audio.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(type === "win" ? 1080 : freq * 1.25, audio.currentTime + 0.18);
+    gain.gain.setValueAtTime(0.0001, audio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, audio.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.22);
+    osc.connect(gain).connect(audio.destination);
+    osc.start();
+    osc.stop(audio.currentTime + 0.24);
+  } catch {}
+}
+
+function freshBlackjack() {
+  return { active: false, bet: 10, deck: [], player: [], dealer: [], phase: "idle", message: "选择下注金币，老黄会先发牌。", revealDealer: false, outcome: "" };
+}
+
+function makeDeck() {
+  const suits = ["♠", "♥", "♦", "♣"];
+  const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  const deck = suits.flatMap((suit) => ranks.map((rank) => ({ suit, rank })));
+  for (let i = deck.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function handValue(cards) {
+  let total = 0;
+  let aces = 0;
+  cards.forEach((card) => {
+    if (card.rank === "A") { total += 11; aces += 1; }
+    else total += ["K", "Q", "J"].includes(card.rank) ? 10 : Number(card.rank);
+  });
+  while (total > 21 && aces) { total -= 10; aces -= 1; }
+  return total;
+}
+
+function startBlackjackRound(bet) {
+  bet = Math.max(1, Math.floor(bet));
+  if (player.coins < bet) return toast("金币不足，无法下注");
+  const deck = makeDeck();
+  blackjack = {
+    active: true,
+    bet,
+    deck,
+    player: [deck.pop(), deck.pop()],
+    dealer: [deck.pop(), deck.pop()],
+    phase: "player",
+    revealDealer: false,
+    outcome: "",
+    message: `你下注 ${bet} 金币。要牌还是停牌交给老黄？`,
+  };
+  commit((draft) => { draft.players[clientId].coins -= bet; }, "blackjack-bet");
+  playTone("slot");
+  openBlackjack();
+}
+
+function blackjackHit() {
+  if (!blackjack || blackjack.phase !== "player") return;
+  blackjack.player.push(blackjack.deck.pop());
+  blackjack.message = "你拿到一张新牌。";
+  if (handValue(blackjack.player) > 21) settleBlackjack("lose");
+  else openBlackjack();
+}
+
+function blackjackStand() {
+  if (!blackjack || blackjack.phase !== "player") return;
+  blackjack.phase = "dealer";
+  blackjack.revealDealer = true;
+  while (handValue(blackjack.dealer) < 17) blackjack.dealer.push(blackjack.deck.pop());
+  const pv = handValue(blackjack.player);
+  const dv = handValue(blackjack.dealer);
+  if (dv > 21 || pv > dv) settleBlackjack("win");
+  else if (pv === dv) settleBlackjack("push");
+  else settleBlackjack("lose");
+}
+
+function settleBlackjack(result) {
+  blackjack.phase = "done";
+  blackjack.revealDealer = true;
+  blackjack.outcome = result;
+  const bet = blackjack.bet;
+  const payout = result === "win" ? bet * 2 : result === "push" ? bet : 0;
+  if (payout > 0) commit((draft) => { draft.players[clientId].coins += payout; }, "blackjack-payout");
+  blackjack.message = result === "win" ? `赢了老黄！返还 ${payout} 金币。` : result === "push" ? "平局，退回下注。" : "老黄赢了，这局没收获。";
+  playTone(result === "win" ? "win" : "trash");
+  openBlackjack();
+}
+
+function renderBlackjack() {
+  const b = blackjack;
+  const dealerCards = b.dealer.map((card, i) => cardHtml(card, i === 1 && !b.revealDealer)).join("");
+  const playerCards = b.player.map((card) => cardHtml(card, false)).join("");
+  return `
+    <div class="blackjack-table">
+      <div class="huang-card">
+        <div class="huang-avatar"><span class="huang-hat"></span><span class="huang-face"></span><span class="huang-mustache"></span></div>
+        <div><strong>农场主老黄</strong><p>“下注随你，牌桌讲运气。”</p></div>
+      </div>
+      <div class="bet-row">
+        <label>下注金币<input id="bjBet" inputmode="numeric" value="${b.bet || 10}" ${b.phase !== "idle" && b.phase !== "done" ? "disabled" : ""}></label>
+        <button class="market-action primary-action" data-bj="deal">${b.phase === "done" ? "再来一局" : "发牌"}</button>
+      </div>
+      <div class="card-zone">
+        <strong>老黄 ${b.revealDealer ? `(${handValue(b.dealer)}点)` : ""}</strong>
+        <div class="cards">${dealerCards || `<span class="empty-card">待发牌</span>`}</div>
+      </div>
+      <div class="card-zone player-zone">
+        <strong>你 ${b.player.length ? `(${handValue(b.player)}点)` : ""}</strong>
+        <div class="cards">${playerCards || `<span class="empty-card">待发牌</span>`}</div>
+      </div>
+      <p class="bj-message">${b.message}</p>
+      <div class="bj-actions">
+        <button class="market-action" data-bj="hit" ${b.phase !== "player" ? "disabled" : ""}>要牌</button>
+        <button class="market-action primary-action" data-bj="stand" ${b.phase !== "player" ? "disabled" : ""}>停牌/交牌</button>
+        <button class="market-action" data-bj="peek" ${b.phase !== "player" ? "disabled" : ""}>看牌</button>
+      </div>
+    </div>
+  `;
+}
+
+function cardHtml(card, hidden) {
+  if (hidden) return `<span class="bj-card hidden-card">?</span>`;
+  const red = card.suit === "♥" || card.suit === "♦";
+  return `<span class="bj-card ${red ? "red" : ""}"><b>${card.rank}</b><em>${card.suit}</em></span>`;
 }
 
 function openMarket(filter = "") {
@@ -486,12 +718,14 @@ function cropProgressFor(plot) {
 }
 
 function itemName(key) {
+  if (prizes[key]) return `${prizes[key].tier}·${prizes[key].name}`;
   const mutation = isMutation(key);
   const raw = mutation ? key.replace("mut_", "") : key;
   return `${mutation ? "✨变异" : ""}${crops[raw]?.name || raw}`;
 }
 
 function itemIcon(key) {
+  if (prizes[key]) return prizes[key].emoji;
   const raw = key.replace("mut_", "");
   const icon = crops[raw]?.emoji || "🥬";
   return isMutation(key) ? `✨${icon}` : icon;
@@ -501,7 +735,18 @@ function isMutation(key) {
   return key.startsWith("mut_");
 }
 
+function isPrize(key) {
+  return key.startsWith("prize_");
+}
+
+function itemDescription(key) {
+  if (prizes[key]) return `${prizes[key].tier}奖品，参考价值 ${prizes[key].value} 金币，可收藏或上架集市。`;
+  if (isMutation(key)) return "稀有变异蔬菜，可高价挂到集市。";
+  return "普通蔬菜，可留存、交易或等待集市需求。";
+}
+
 function defaultPrice(key) {
+  if (prizes[key]) return prizes[key].value;
   const raw = key.replace("mut_", "");
   const base = crops[raw]?.sell || 10;
   return isMutation(key) ? base * 60 : base;
@@ -556,12 +801,32 @@ function draw() {
   sky.addColorStop(1, "#ffd993");
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, w, h);
+  drawSkyFlow(w, h);
   drawClouds(w);
   drawBirds(w, h);
   drawFarmBase(w, h);
   drawPlots(w, h);
   drawParticles();
   drawHudHint(w, h);
+}
+
+function drawSkyFlow(w, h) {
+  ctx.save();
+  ctx.globalAlpha = 0.16;
+  for (let i = 0; i < 5; i += 1) {
+    const y = 72 + i * 32 + Math.sin(t * 0.7 + i) * 7;
+    const grad = ctx.createLinearGradient(0, y - 20, w, y + 20);
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(0.5, "rgba(255,255,255,.9)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.moveTo(-40, y);
+    ctx.bezierCurveTo(w * 0.25, y - 22, w * 0.62, y + 22, w + 40, y - 8);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawClouds(w) {
@@ -616,6 +881,18 @@ function drawFarmBase(w, h) {
     const y = -h * 0.16 + ((i * 37) % (h * 0.54));
     ctx.fillRect(x, y, 11, 3);
   }
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = "#ddffd0";
+  ctx.lineWidth = 6;
+  for (let i = 0; i < 8; i += 1) {
+    const y = -h * 0.1 + i * h * 0.075 + Math.sin(t + i) * 5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.56, y);
+    ctx.bezierCurveTo(-w * 0.2, y - 18, w * 0.12, y + 18, w * 0.55, y - 6);
+    ctx.stroke();
+  }
+  ctx.restore();
   drawFarmDecoration(w, h);
   const path = ctx.createLinearGradient(0, h * 0.22, 0, h * 0.33);
   path.addColorStop(0, "#c8884c");
@@ -741,26 +1018,152 @@ function drawPlot(plot, x, y, size, index) {
 function drawCrop(plot, size) {
   const crop = crops[plot.crop];
   const p = cropProgress(plot);
-  const [leaf, fruit] = crop.colors;
   ctx.save();
   ctx.translate(size / 2, size * 0.56);
-  if (plot.crop === "corn" && art.corn?.complete) {
-    const asset = p > 0.72 ? art.cornDouble : p > 0.34 ? art.corn : art.cornYoung;
-    if (asset?.complete) {
-      const scale = p < 0.34 ? 0.58 : p < 0.72 ? 0.78 : 1;
-      ctx.drawImage(asset, -size * 0.32 * scale, -size * 0.52 * scale, size * 0.64 * scale, size * 0.72 * scale);
-      ctx.restore();
-      return;
-    }
-  }
-  const stage = p < 0.34 ? 0.45 : p < 0.75 ? 0.72 : 1;
-  ctx.scale(stage, stage);
-  drawCropShape(plot.crop, leaf, fruit, p);
+  drawCropBadge(plot.crop, crop, p, size);
   if (plot.watered) {
     ctx.globalAlpha = 0.55;
     ctx.fillStyle = "#8be9ff";
     ctx.beginPath();
     ctx.arc(24, 20, 4 + Math.sin(t * 4) * 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCropBadge(type, crop, p, size) {
+  const stage = 0.72 + p * 0.32;
+  ctx.save();
+  ctx.scale(stage, stage);
+  ctx.fillStyle = "rgba(33, 72, 35, .25)";
+  ctx.beginPath();
+  ctx.ellipse(0, 18, size * 0.22, size * 0.08, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.65)";
+  ctx.beginPath();
+  ctx.arc(0, -7, size * 0.25, 0, TAU);
+  ctx.fill();
+  drawCropVector(type, size);
+  if (p >= 1) {
+    ctx.strokeStyle = "rgba(255,242,121,.85)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, -8, size * 0.31 + Math.sin(t * 4) * 2, 0, TAU);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawCropVector(type, size) {
+  ctx.save();
+  ctx.translate(0, -8 + Math.sin(t * 2) * 1.2);
+  const s = size / 82;
+  ctx.scale(s, s);
+  if (type === "carrot") {
+    ctx.fillStyle = "#57b95d";
+    [-9, 0, 9].forEach((x, i) => {
+      ctx.save();
+      ctx.translate(x, -21);
+      ctx.rotate((i - 1) * 0.45);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 6, 14, 0, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    });
+    const grad = ctx.createLinearGradient(0, -12, 0, 22);
+    grad.addColorStop(0, "#ffb25b");
+    grad.addColorStop(1, "#f36f27");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(-13, -9);
+    ctx.quadraticCurveTo(0, -18, 13, -9);
+    ctx.quadraticCurveTo(7, 11, 0, 25);
+    ctx.quadraticCurveTo(-8, 10, -13, -9);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(126,66,20,.25)";
+    ctx.lineWidth = 2;
+    [-3, 6, 14].forEach((y) => {
+      ctx.beginPath();
+      ctx.moveTo(-5, y);
+      ctx.lineTo(7, y - 3);
+      ctx.stroke();
+    });
+  } else if (type === "tomato") {
+    ctx.fillStyle = "#e84838";
+    ctx.beginPath();
+    ctx.arc(0, 1, 22, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "#ff7568";
+    ctx.beginPath();
+    ctx.arc(-8, -8, 7, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "#3d9a48";
+    for (let i = 0; i < 5; i += 1) {
+      ctx.save();
+      ctx.rotate(i * TAU / 5);
+      ctx.beginPath();
+      ctx.moveTo(0, -4);
+      ctx.lineTo(5, -20);
+      ctx.lineTo(-5, -20);
+      ctx.fill();
+      ctx.restore();
+    }
+  } else if (type === "corn") {
+    ctx.fillStyle = "#60b45e";
+    ctx.beginPath();
+    ctx.ellipse(-12, 4, 8, 25, -0.35, 0, TAU);
+    ctx.ellipse(12, 4, 8, 25, 0.35, 0, TAU);
+    ctx.fill();
+    const grad = ctx.createLinearGradient(0, -24, 0, 22);
+    grad.addColorStop(0, "#ffe87b");
+    grad.addColorStop(1, "#f3b72e");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 13, 28, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "rgba(158,103,13,.18)";
+    for (let y = -16; y <= 14; y += 8) {
+      ctx.fillRect(-9, y, 18, 2);
+    }
+  } else if (type === "watermelon") {
+    const grad = ctx.createRadialGradient(-8, -8, 4, 0, 0, 25);
+    grad.addColorStop(0, "#8cff7b");
+    grad.addColorStop(1, "#21914a");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(9,89,43,.45)";
+    ctx.lineWidth = 4;
+    [-10, 0, 10].forEach((x) => {
+      ctx.beginPath();
+      ctx.ellipse(x, 0, 6, 22, 0, 0, TAU);
+      ctx.stroke();
+    });
+    ctx.fillStyle = "#f55e6f";
+    ctx.beginPath();
+    ctx.moveTo(-18, 5);
+    ctx.quadraticCurveTo(0, 22, 18, 5);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    const grad = ctx.createLinearGradient(0, -24, 0, 24);
+    grad.addColorStop(0, "#9b65e6");
+    grad.addColorStop(1, "#5d2b98");
+    ctx.fillStyle = grad;
+    ctx.save();
+    ctx.rotate(-0.25);
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 14, 28, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = "#54aa5a";
+    ctx.beginPath();
+    ctx.moveTo(-12, -20);
+    ctx.lineTo(0, -32);
+    ctx.lineTo(12, -20);
+    ctx.lineTo(0, -15);
+    ctx.closePath();
     ctx.fill();
   }
   ctx.restore();
@@ -955,23 +1358,32 @@ function toast(text) {
   toast._timer = setTimeout(() => toastEl.classList.add("hidden"), 2200);
 }
 
+function closeDrawers() {
+  $("#seedStrip").classList.remove("open");
+  $("#actionTray").classList.remove("open");
+  document.querySelector(".dock").classList.remove("open");
+}
+
 function bind() {
   $("#enterGame").addEventListener("click", start);
   $("#closeSheet").addEventListener("click", () => openPanel("garden"));
   $("#seedToggle").addEventListener("click", () => {
+    sheet.classList.add("hidden");
     $("#seedStrip").classList.toggle("open");
     $("#actionTray").classList.remove("open");
     document.querySelector(".dock").classList.remove("open");
   });
   $("#toolToggle").addEventListener("click", () => {
+    sheet.classList.add("hidden");
     $("#actionTray").classList.toggle("open");
     $("#seedStrip").classList.remove("open");
     document.querySelector(".dock").classList.remove("open");
   });
   $("#menuToggle").addEventListener("click", () => {
-    document.querySelector(".dock").classList.toggle("open");
+    sheet.classList.add("hidden");
     $("#seedStrip").classList.remove("open");
     $("#actionTray").classList.remove("open");
+    document.querySelector(".dock").classList.toggle("open");
   });
   $("#closeTrays").addEventListener("click", () => {
     $("#seedStrip").classList.remove("open");
@@ -1021,6 +1433,7 @@ function bind() {
     if (event.target.id === "marketSearch") openMarket(event.target.value.trim());
   });
   sheetBody.addEventListener("click", (event) => {
+    const bagTab = event.target.closest("[data-bag-tab]")?.dataset.bagTab;
     const listKey = event.target.closest("[data-list]")?.dataset.list;
     const openListKey = event.target.closest("[data-open-list]")?.dataset.openList;
     const bagSelect = event.target.closest("[data-bag-select]")?.dataset.bagSelect;
@@ -1028,6 +1441,9 @@ function bind() {
     const buyId = event.target.closest("[data-buy]")?.dataset.buy;
     const marketSelect = event.target.closest("[data-market-select]")?.dataset.marketSelect;
     const playerSelect = event.target.closest("[data-player-select]")?.dataset.playerSelect;
+    const bjAction = event.target.closest("[data-bj]")?.dataset.bj;
+    if (event.target.closest("#spinLottery")) spinLottery();
+    if (bagTab) { bagCategory = bagTab; selectedBagKey = ""; openBag(); }
     if (listKey) listItem(listKey, Number($(`#qty-${CSS.escape(listKey)}`).value), Number($(`#price-${CSS.escape(listKey)}`).value));
     if (openListKey) openListingModal(openListKey);
     if (bagSelect) { selectedBagKey = bagSelect; openBag(); }
@@ -1035,6 +1451,10 @@ function bind() {
     if (buyId) buy(buyId);
     if (marketSelect) { selectedListingId = marketSelect; openMarket($("#marketSearch")?.value.trim() || ""); }
     if (playerSelect) { selectedPlayerId = playerSelect; openPlayers(); }
+    if (bjAction === "deal") startBlackjackRound(Number($("#bjBet")?.value || 10));
+    if (bjAction === "hit") blackjackHit();
+    if (bjAction === "stand") blackjackStand();
+    if (bjAction === "peek") { blackjack.message = `你的牌面是 ${handValue(blackjack.player)} 点。`; openBlackjack(); }
   });
   window.addEventListener("resize", resize);
   window.addEventListener("storage", syncFromStorage);

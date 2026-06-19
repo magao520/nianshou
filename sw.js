@@ -1,10 +1,10 @@
-const CACHE_NAME = "cloud-farm-v36";
+const CACHE_NAME = "cloud-farm-v37";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=36",
-  "./src/styles.css?v=36",
-  "./src/game.js?v=36",
+  "./manifest.webmanifest?v=37",
+  "./src/styles.css?v=37",
+  "./src/game.js?v=37",
   "./assets/icon.svg",
   "./assets/art/cloud_farm_entry_bg.jpg",
   "./assets/2d/kenney/particles/flame_06.png",

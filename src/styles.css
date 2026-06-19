@@ -347,10 +347,10 @@ h1 {
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: max(14px, env(safe-area-inset-bottom));
-  z-index: 5;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  z-index: 10;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   padding: 8px;
   border-radius: 28px;
@@ -378,6 +378,10 @@ h1 {
   color: #263025;
   background: linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,247,222,.65));
   font-weight: 1000;
+}
+
+.dock button {
+  padding: 11px 6px;
 }
 
 .dock button.active,
@@ -493,6 +497,24 @@ h1 {
   grid-template-columns: minmax(132px, 0.9fr) minmax(160px, 1.1fr);
   gap: 10px;
   min-height: 320px;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.tabs button {
+  border-radius: 18px;
+  padding: 10px;
+  background: rgba(255,255,255,.62);
+  font-weight: 1000;
+}
+
+.tabs button.active {
+  background: linear-gradient(180deg, #fff27c, #69da75);
 }
 
 .pane-list,
@@ -638,6 +660,208 @@ h1 {
   background: rgba(38, 48, 37, 0.82);
   box-shadow: 0 16px 36px rgba(32, 26, 12, 0.22);
   font-weight: 900;
+}
+
+.lottery-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.slot-machine {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  padding: 18px;
+  border-radius: 28px;
+  color: #fff9df;
+  background:
+    radial-gradient(circle at 30% 15%, rgba(255,255,255,.22), transparent 28%),
+    linear-gradient(160deg, #753cba, #253575 54%, #183823);
+  box-shadow: inset 0 0 0 3px rgba(255,255,255,.16), 0 18px 34px rgba(45,28,80,.24);
+}
+
+.slot-title {
+  font-size: 22px;
+  font-weight: 1000;
+}
+
+.reels {
+  display: grid;
+  grid-template-columns: repeat(3, 74px);
+  gap: 8px;
+}
+
+.reels span {
+  display: grid;
+  place-items: center;
+  height: 84px;
+  border-radius: 20px;
+  font-size: 42px;
+  background: linear-gradient(180deg, #fffdf1, #ffd986);
+  box-shadow: inset 0 -10px 20px rgba(144,78,14,.18);
+}
+
+.slot-machine.spinning .reels span {
+  animation: reelSpin .22s linear infinite;
+}
+
+.prize-table {
+  display: grid;
+  gap: 8px;
+}
+
+.prize-table div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.66);
+}
+
+.blackjack-table {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 28px;
+  color: #fff7df;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255,216,113,.22), transparent 22%),
+    linear-gradient(160deg, #245833, #173b2f 56%, #6c4528);
+}
+
+.huang-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 22px;
+  background: rgba(255,255,255,.14);
+}
+
+.huang-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #b8ef73, #5ab25e);
+  overflow: hidden;
+}
+
+.huang-hat {
+  position: absolute;
+  top: 7px;
+  width: 42px;
+  height: 13px;
+  border-radius: 12px 12px 4px 4px;
+  background: #e7b75b;
+  box-shadow: 0 7px 0 #b97635;
+}
+
+.huang-face {
+  position: absolute;
+  top: 22px;
+  width: 31px;
+  height: 29px;
+  border-radius: 45% 45% 48% 48%;
+  background: #ffd29a;
+}
+
+.huang-face::before,
+.huang-face::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #51351f;
+}
+
+.huang-face::before {
+  left: 8px;
+}
+
+.huang-face::after {
+  right: 8px;
+}
+
+.huang-mustache {
+  position: absolute;
+  top: 39px;
+  width: 22px;
+  height: 7px;
+  border-radius: 999px;
+  background: #6b3f20;
+}
+
+.bet-row,
+.bj-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.bj-actions {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.card-zone {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.12);
+}
+
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bj-card,
+.empty-card {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 64px;
+  border-radius: 10px;
+  color: #1f2b25;
+  background: #fffdf3;
+  box-shadow: 0 8px 16px rgba(0,0,0,.16);
+  animation: dealCard .32s cubic-bezier(.2,.9,.2,1.1) both;
+}
+
+.bj-card.red {
+  color: #c8323f;
+}
+
+.bj-card.hidden-card {
+  color: #fff7d7;
+  background: repeating-linear-gradient(45deg, #3e7b45 0 7px, #2d6438 7px 14px);
+}
+
+.bj-card b,
+.bj-card em {
+  line-height: 1;
+}
+
+.bj-message {
+  margin: 0;
+  color: #fff2bd;
+  font-weight: 900;
+}
+
+@keyframes reelSpin {
+  50% { transform: translateY(-8px) scale(1.04); filter: blur(.4px); }
+}
+
+@keyframes dealCard {
+  from { opacity: 0; transform: translateY(-18px) rotate(-7deg) scale(.8); }
 }
 
 @keyframes cardIn {
