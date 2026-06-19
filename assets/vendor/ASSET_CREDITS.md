@@ -8,6 +8,8 @@
 - 入口背景：使用 AI 生成的原创卡通农场插画 `assets/art/cloud_farm_entry_bg.jpg`，用于进场画面背景。
 - Kenney Isometric Miniature Farm：官方页面标注 Creative Commons CC0，下载包用于农田、围栏、玉米、干草、袋子等农场装饰素材。
 - Kenney Game Icons：官方页面标注 Creative Commons CC0，下载包用于集市、奖章、回收等界面图标素材。
+- Kenney Casino Audio：官方页面标注 Creative Commons CC0，下载包用于摇摇乐开盒音效、筹码/发牌音效。
+- Kenney Playing Cards Pack：官方页面标注 Creative Commons CC0，下载包用于二十一点扑克牌牌面与牌背。
 - Kenney UI Pack RPG Expansion：官方页面标注 Creative Commons CC0，下载包用于按钮、面板等 2D UI 参考与素材。
 - Kenney Particle Pack：官方页面标注 Creative Commons CC0，下载包用于火焰、烟雾、斩击、光晕等 2D 粒子贴图。
 - Kenney Nature Kit：官方页面标注 Creative Commons CC0，历史 3D 版本曾用于树、棕榈、岩石、灌木等 GLB 模型；当前 2D 版本不再加载这些模型。

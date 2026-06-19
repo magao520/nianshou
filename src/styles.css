@@ -556,6 +556,16 @@ h1 {
   background: linear-gradient(180deg, #fff7c7, #eaffc9);
 }
 
+.sell-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+}
+
+.sell-row input {
+  text-align: center;
+}
+
 .card-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -675,7 +685,8 @@ h1 {
   gap: 12px;
 }
 
-.slot-machine {
+.slot-machine,
+.case-machine {
   position: relative;
   overflow: hidden;
   display: grid;
@@ -713,6 +724,78 @@ h1 {
 
 .slot-machine.spinning .reels span {
   animation: reelSpin .22s linear infinite;
+}
+
+.case-window {
+  position: relative;
+  width: min(100%, 420px);
+  height: 116px;
+  overflow: hidden;
+  border-radius: 22px;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,.42), transparent 18%, transparent 82%, rgba(0,0,0,.42)),
+    linear-gradient(180deg, #172244, #26326a);
+  box-shadow: inset 0 0 0 3px rgba(255,255,255,.12);
+}
+
+.case-marker {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 3px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, #fff176, #ff5757);
+  box-shadow: 0 0 18px rgba(255, 241, 118, .9);
+}
+
+.case-track {
+  display: flex;
+  gap: 8px;
+  padding: 12px 170px 12px 18px;
+  transition: transform .08s linear;
+  will-change: transform;
+}
+
+.case-item {
+  flex: 0 0 88px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  height: 92px;
+  border-radius: 18px;
+  color: #fffbe8;
+  text-align: center;
+  background: linear-gradient(180deg, #5b6477, #2a3144);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.08);
+}
+
+.case-item b {
+  font-size: 30px;
+}
+
+.case-item em {
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1.12;
+}
+
+.case-item.uncommon {
+  background: linear-gradient(180deg, #4675ce, #263d86);
+}
+
+.case-item.rare {
+  background: linear-gradient(180deg, #af5ee8, #5a268d);
+}
+
+.case-item.legendary {
+  background: linear-gradient(180deg, #ffcc59, #b8521d);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.22), 0 0 22px rgba(255, 194, 62, .45);
+}
+
+.case-machine.spinning .case-marker {
+  animation: markerPulse .18s linear infinite;
 }
 
 .prize-table {
@@ -899,27 +982,20 @@ h1 {
 .empty-card {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 58px;
-  border-radius: 10px;
+  width: 48px;
+  height: 67px;
+  border-radius: 8px;
   color: #1f2b25;
-  background: #fffdf3;
+  background: transparent;
   box-shadow: 0 8px 16px rgba(0,0,0,.16);
-  animation: dealCard .32s cubic-bezier(.2,.9,.2,1.1) both;
 }
 
-.bj-card.red {
-  color: #c8323f;
-}
-
-.bj-card.hidden-card {
-  color: #fff7d7;
-  background: repeating-linear-gradient(45deg, #3e7b45 0 7px, #2d6438 7px 14px);
-}
-
-.bj-card b,
-.bj-card em {
-  line-height: 1;
+.bj-card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
 }
 
 .bj-message {
@@ -952,6 +1028,10 @@ h1 {
 
 @keyframes reelSpin {
   50% { transform: translateY(-8px) scale(1.04); filter: blur(.4px); }
+}
+
+@keyframes markerPulse {
+  50% { transform: translateX(-50%) scaleY(1.08); filter: brightness(1.5); }
 }
 
 @keyframes dealCard {

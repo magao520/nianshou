@@ -1,10 +1,10 @@
-const CACHE_NAME = "cloud-farm-v38";
+const CACHE_NAME = "cloud-farm-v39";
 const ASSETS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest?v=38",
-  "./src/styles.css?v=38",
-  "./src/game.js?v=38",
+  "./manifest.webmanifest?v=39",
+  "./src/styles.css?v=39",
+  "./src/game.js?v=39",
   "./assets/icon.svg",
   "./assets/art/cloud_farm_entry_bg.jpg",
   "./assets/2d/kenney/particles/flame_06.png",
@@ -28,6 +28,14 @@ const ASSETS = [
   "./assets/2d/kenney/game-icons/medal1.png",
   "./assets/vendor/ASSET_CREDITS.md",
   "./assets/vendor/KENNEY_CC0_LICENSE.txt",
+  "./assets/vendor/kenney/audio/dice-shake-3.ogg",
+  "./assets/vendor/kenney/audio/chips-stack-6.ogg",
+  "./assets/vendor/kenney/audio/chips-handle-1.ogg",
+  "./assets/vendor/kenney/audio/card-slide-1.ogg",
+  "./assets/vendor/kenney/audio/card-place-1.ogg",
+  "./assets/vendor/kenney/audio/card-shuffle.ogg",
+  "./assets/vendor/kenney/audio/cards-pack-open-1.ogg",
+  "./assets/vendor/kenney/cards/card_back.png",
 ];
 
 self.addEventListener("install", (event) => {

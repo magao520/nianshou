@@ -25,6 +25,16 @@ const MUTATION_RATE = 1 / 1000;
 const ONLINE_WINDOW = 90_000;
 const RECENT_WINDOW = 10 * 60_000;
 const art = {};
+const CARD_BASE = "./assets/vendor/kenney/cards/";
+const AUDIO = {
+  case: "./assets/vendor/kenney/audio/dice-shake-3.ogg",
+  win: "./assets/vendor/kenney/audio/chips-stack-6.ogg",
+  trash: "./assets/vendor/kenney/audio/chips-handle-1.ogg",
+  deal: "./assets/vendor/kenney/audio/card-slide-1.ogg",
+  place: "./assets/vendor/kenney/audio/card-place-1.ogg",
+  shuffle: "./assets/vendor/kenney/audio/card-shuffle.ogg",
+  open: "./assets/vendor/kenney/audio/cards-pack-open-1.ogg",
+};
 
 const crops = {
   carrot: { name: "胡萝卜", emoji: "🥕", growMs: 30 * 60_000, seedCost: 3, sell: 9, colors: ["#86c85a", "#ff9948"] },
@@ -76,6 +86,9 @@ let selectedPlayerId = "";
 let lotterySpinning = false;
 let lotteryReels = ["🥕", "🌽", "🍅"];
 let lotteryMessage = "10 金币摇一次，奖品会进入背包奖品页。";
+let lotteryCaseItems = [];
+let lotteryCaseOffset = 0;
+let lotteryPrize = null;
 let blackjack = null;
 
 [
@@ -263,6 +276,7 @@ function water(plotIndex) {
     draft.players[clientId].plots[plotIndex].updatedAt = now();
   }, "water");
   splash(plotScreen(plotIndex));
+  playSound("place");
 }
 
 function harvest(plotIndex) {
@@ -397,19 +411,10 @@ function sellInventoryItem(key, qty = player.inventory[key] || 0) {
 function sellInventoryCrops() {
   const rows = Object.entries(player.inventory || {}).filter(([key]) => !isPrize(key));
   if (!rows.length) return toast("暂无成熟地块，也没有可出售的背包蔬菜");
-  let earned = 0;
-  let count = 0;
-  commit((draft) => {
-    const p = draft.players[clientId];
-    rows.forEach(([key, qty]) => {
-      earned += defaultPrice(key) * qty;
-      count += qty;
-      delete p.inventory[key];
-    });
-    p.coins += earned;
-    draft.events.push({ id: uid(), time: now(), text: `${p.name} 出售了背包里的 ${count} 个蔬菜` });
-  }, "sell-inventory-crops");
-  toast(`出售背包蔬菜 ${count} 个，获得 ${earned} 金币`);
+  bagCategory = "crops";
+  selectedBagKey = rows[0][0];
+  openPanel("bag");
+  toast("选择农作物并输入数量后出售，不会再一键卖光");
 }
 
 function renderAll() {
@@ -473,7 +478,7 @@ function openBag() {
       <div class="pane-detail">
         <div class="item-title"><span class="item-icon">${itemIcon(selectedBagKey)}</span><div><strong>${itemName(selectedBagKey)}</strong><p>${itemDescription(selectedBagKey)}</p></div></div>
         <span class="chip">库存 ×${selectedQty}</span>
-        ${!isPrize(selectedBagKey) ? `<button class="market-action" data-sell-item="${selectedBagKey}">直接出售全部</button>` : ""}
+        ${!isPrize(selectedBagKey) ? `<div class="sell-row"><input id="sellQty-${selectedBagKey}" inputmode="numeric" value="1" min="1" max="${selectedQty}" aria-label="出售数量" /><button class="market-action" data-sell-item="${selectedBagKey}">出售选定数量</button></div>` : ""}
         <button class="market-action primary-action" data-open-list="${selectedBagKey}">上架</button>
       </div>
     </div>
@@ -482,11 +487,17 @@ function openBag() {
 
 function openLottery() {
   sheetTitle.textContent = "摇摇乐";
+  if (!lotteryCaseItems.length) lotteryCaseItems = makeCaseItems();
   sheetBody.innerHTML = `
     <div class="lottery-layout">
-      <div class="slot-machine ${lotterySpinning ? "spinning" : ""}">
-        <div class="slot-title">云上摇摇乐</div>
-        <div class="reels">${lotteryReels.map((x) => `<span>${x}</span>`).join("")}</div>
+      <div class="case-machine ${lotterySpinning ? "spinning" : ""}">
+        <div class="slot-title">云上开盒摇摇乐</div>
+        <div class="case-window">
+          <div class="case-marker"></div>
+          <div class="case-track" style="transform: translateX(${lotteryCaseOffset}px)">
+            ${lotteryCaseItems.map((key) => `<span class="case-item ${prizeClass(key)}"><b>${itemIcon(key)}</b><em>${itemName(key).replace("·", "<br>")}</em></span>`).join("")}
+          </div>
+        </div>
         <p>${lotteryMessage}</p>
         <button class="market-action primary-action" id="spinLottery" ${lotterySpinning ? "disabled" : ""}>10 金币摇一次</button>
       </div>
@@ -501,7 +512,7 @@ function openLottery() {
 }
 
 function openBlackjack() {
-  sheetTitle.textContent = "老黄的二十一点";
+  sheetTitle.textContent = "老王的二十一点";
   if (!blackjack) blackjack = freshBlackjack();
   sheetBody.innerHTML = renderBlackjack();
 }
@@ -517,35 +528,69 @@ function rollLotteryPrize() {
   return { key, tier: tier.tier, icon: itemIcon(key), name: itemName(key) };
 }
 
+function prizeClass(key) {
+  if (["prize_super_mutation", "prize_rare_seed"].includes(key)) return "legendary";
+  if (key === "prize_gift_box") return "rare";
+  if (["prize_seed_box", "prize_postcard"].includes(key)) return "uncommon";
+  return "common";
+}
+
+function makeCaseItems(winningKey = null) {
+  const weighted = [
+    "prize_straw", "prize_mud", "prize_broken_boot", "prize_straw", "prize_mud",
+    "prize_seed_box", "prize_postcard", "prize_gift_box", "prize_rare_seed", "prize_super_mutation",
+  ];
+  const items = Array.from({ length: 48 }, (_, i) => weighted[(Math.random() * weighted.length + i) % weighted.length | 0]);
+  if (winningKey) items[39] = winningKey;
+  return items;
+}
+
 function spinLottery() {
   if (lotterySpinning) return;
   if (player.coins < 10) return toast("金币不够，摇摇乐需要 10 金币");
   lotterySpinning = true;
-  lotteryMessage = "老虎机转起来了...";
+  lotteryPrize = rollLotteryPrize();
+  lotteryCaseItems = makeCaseItems(lotteryPrize.key);
+  lotteryCaseOffset = 0;
+  lotteryMessage = "箱子开始滚动，盯紧中线...";
   openLottery();
-  playTone("slot");
-  const icons = ["🥕", "🍅", "🌽", "🍆", "🍉", "🎁", "📦", "🌈", "🧹", "🥾"];
-  let ticks = 0;
-  const timer = setInterval(() => {
-    lotteryReels = Array.from({ length: 3 }, () => icons[Math.floor(Math.random() * icons.length)]);
+  playSound("case");
+  const itemWidth = 96;
+  const targetIndex = 39;
+  const finalOffset = -(targetIndex * itemWidth - 104) - Math.random() * 28;
+  const started = performance.now();
+  const duration = 3600;
+  const tick = () => {
+    const p = clamp((performance.now() - started) / duration, 0, 1);
+    const ease = 1 - Math.pow(1 - p, 4);
+    lotteryCaseOffset = Math.round(finalOffset * ease + Math.sin(p * 58) * (1 - p) * 16);
     if (activePanel === "lottery") openLottery();
-    ticks += 1;
-    if (ticks >= 12) {
-      clearInterval(timer);
-      const prize = rollLotteryPrize();
-      lotteryReels = [prize.icon, prize.icon, prize.icon];
+    if (p < 1) requestAnimationFrame(tick);
+    else {
       commit((draft) => {
         const p = draft.players[clientId];
         p.coins -= 10;
-        p.inventory[prize.key] = (p.inventory[prize.key] || 0) + 1;
-        draft.events.push({ id: uid(), time: now(), text: `${p.name} 摇摇乐抽到 ${prize.name}` });
+        p.inventory[lotteryPrize.key] = (p.inventory[lotteryPrize.key] || 0) + 1;
+        draft.events.push({ id: uid(), time: now(), text: `${p.name} 摇摇乐抽到 ${lotteryPrize.name}` });
       }, "lottery");
-      lotteryMessage = `${prize.tier}！获得 ${prize.name}，已存入背包奖品页。`;
+      lotteryMessage = `${lotteryPrize.tier}！获得 ${lotteryPrize.name}，已存入背包奖品页。`;
       lotterySpinning = false;
-      playTone(prize.tier === "参与奖" ? "trash" : "win");
+      playSound(lotteryPrize.tier === "参与奖" ? "trash" : "win");
       if (activePanel === "lottery") openLottery();
     }
-  }, 95);
+  };
+  requestAnimationFrame(tick);
+}
+
+function playSound(type) {
+  const src = AUDIO[type];
+  if (src) {
+    const audio = new Audio(src);
+    audio.volume = type === "case" ? 0.42 : 0.58;
+    audio.play().catch(() => playTone(type));
+    return;
+  }
+  playTone(type);
 }
 
 function playTone(type) {
@@ -567,7 +612,7 @@ function playTone(type) {
 }
 
 function freshBlackjack() {
-  return { active: false, bet: 10, deck: [], player: [], dealer: [], phase: "idle", message: "选择下注金币，老黄会先发牌。", revealDealer: false, outcome: "" };
+  return { active: false, bet: 10, deck: [], player: [], dealer: [], phase: "idle", message: "选择下注金币，老王会先发牌。", revealDealer: false, outcome: "", fx: "" };
 }
 
 function makeDeck() {
@@ -605,17 +650,20 @@ function startBlackjackRound(bet) {
     phase: "player",
     revealDealer: false,
     outcome: "",
-    message: `你下注 ${bet} 金币。要牌还是停牌交给老黄？`,
+    fx: "deal",
+    message: `你下注 ${bet} 金币。${huangTaunt(0)}`,
   };
   commit((draft) => { draft.players[clientId].coins -= bet; }, "blackjack-bet");
-  playTone("slot");
+  playSound("shuffle");
   openBlackjack();
 }
 
 function blackjackHit() {
   if (!blackjack || blackjack.phase !== "player") return;
   blackjack.player.push(blackjack.deck.pop());
-  blackjack.message = "你拿到一张新牌。";
+  blackjack.fx = "hit";
+  blackjack.message = `你拿到一张新牌。${huangTaunt(handValue(blackjack.player))}`;
+  playSound("deal");
   if (handValue(blackjack.player) > 21) settleBlackjack("lose");
   else openBlackjack();
 }
@@ -624,6 +672,8 @@ function blackjackStand() {
   if (!blackjack || blackjack.phase !== "player") return;
   blackjack.phase = "dealer";
   blackjack.revealDealer = true;
+  blackjack.fx = "stand";
+  playSound("place");
   while (handValue(blackjack.dealer) < 17) blackjack.dealer.push(blackjack.deck.pop());
   const pv = handValue(blackjack.player);
   const dv = handValue(blackjack.dealer);
@@ -639,9 +689,18 @@ function settleBlackjack(result) {
   const bet = blackjack.bet;
   const payout = result === "win" ? bet * 2 : result === "push" ? bet : 0;
   if (payout > 0) commit((draft) => { draft.players[clientId].coins += payout; }, "blackjack-payout");
-  blackjack.message = result === "win" ? `赢了老黄！返还 ${payout} 金币。` : result === "push" ? "平局，退回下注。" : "老黄赢了，这局没收获。";
-  playTone(result === "win" ? "win" : "trash");
+  blackjack.message = result === "win" ? `你赢了老王！返还 ${payout} 金币。老王嘴硬：这把算你运气好。` : result === "push" ? "平局，退回下注。老王：差一点你就没了。" : "老王赢了，这局没收获。老王：还要继续证明自己吗？";
+  playSound(result === "win" ? "win" : "trash");
   openBlackjack();
+}
+
+function huangTaunt(value) {
+  if (!value) return "老王眯着眼说：先发两张，别怂。";
+  if (value <= 10) return "老王敲着桌子：这点数还停？你自己信吗？";
+  if (value <= 15) return "老王笑了：不上不下，最折磨人。";
+  if (value <= 17) return "老王压低声音：再要一张可能起飞，也可能爆。";
+  if (value <= 20) return "老王盯着你：现在停？还是贪一手？";
+  return "老王摊手：爆了吧，年轻人。";
 }
 
 function renderBlackjack() {
@@ -655,7 +714,7 @@ function renderBlackjack() {
       <div class="blackjack-hero">
         <div class="huang-card">
           <div class="huang-avatar"><span class="huang-hat"></span><span class="huang-face"></span><span class="huang-mustache"></span></div>
-          <div><strong>农场主老黄</strong><p>老黄把牌桌支在隔壁牧场，下注看运气。</p></div>
+          <div><strong>农场主老王</strong><p>老王把牌桌支在隔壁牧场，边发牌边给你上压力。</p></div>
         </div>
         <div class="bet-row">
           <label>下注<input id="bjBet" inputmode="numeric" value="${b.bet || 10}" ${b.phase !== "idle" && b.phase !== "done" ? "disabled" : ""}></label>
@@ -664,12 +723,12 @@ function renderBlackjack() {
       </div>
       <div class="bj-scorebar">
         <span>你：${playerValue || "待发牌"}${playerValue ? "点" : ""}</span>
-        <span>老黄：${dealerValue ? `${dealerValue}点` : "暗牌"}</span>
+        <span>老王：${dealerValue ? `${dealerValue}点` : "暗牌"}</span>
         <span>下注：${b.bet || 10}</span>
       </div>
       <div class="bj-board">
         <div class="card-zone dealer-zone">
-          <strong>老黄的牌</strong>
+          <strong>老王的牌</strong>
           <div class="cards">${dealerCards || `<span class="empty-card">待发牌</span>`}</div>
         </div>
         <div class="card-zone player-zone">
@@ -688,9 +747,14 @@ function renderBlackjack() {
 }
 
 function cardHtml(card, hidden) {
-  if (hidden) return `<span class="bj-card hidden-card">?</span>`;
-  const red = card.suit === "♥" || card.suit === "♦";
-  return `<span class="bj-card ${red ? "red" : ""}"><b>${card.rank}</b><em>${card.suit}</em></span>`;
+  if (hidden) return `<span class="bj-card img-card"><img src="${CARD_BASE}card_back.png" alt="暗牌"></span>`;
+  return `<span class="bj-card img-card"><img src="${cardAsset(card)}" alt="${card.rank}${card.suit}"></span>`;
+}
+
+function cardAsset(card) {
+  const suit = { "♠": "spades", "♥": "hearts", "♦": "diamonds", "♣": "clubs" }[card.suit];
+  const rank = { A: "A", K: "K", Q: "Q", J: "J", "10": "10", "9": "09", "8": "08", "7": "07", "6": "06", "5": "05", "4": "04", "3": "03", "2": "02" }[card.rank];
+  return `${CARD_BASE}card_${suit}_${rank}.png`;
 }
 
 function openMarket(filter = "") {
@@ -1472,8 +1536,8 @@ function burst(pos, color, count = 18) {
 }
 
 function splash(pos) {
-  for (let i = 0; i < 16; i += 1) {
-    particles.push({ x: pos.x, y: pos.y, vx: -40 + Math.random() * 80, vy: -80 - Math.random() * 70, life: 0.65, max: 0.65, color: "#74dfff", r: 2 + Math.random() * 3 });
+  for (let i = 0; i < 32; i += 1) {
+    particles.push({ kind: i < 10 ? "stream" : "drop", x: pos.x - 28 + Math.random() * 20, y: pos.y - 52 + Math.random() * 18, vx: 35 + Math.random() * 80, vy: 120 + Math.random() * 110, life: 0.75, max: 0.75, color: i < 10 ? "#bff7ff" : "#4ed8ff", r: 2 + Math.random() * 3 });
   }
 }
 
@@ -1492,10 +1556,20 @@ function drawParticles() {
   particles.forEach((p) => {
     ctx.save();
     ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
+    if (p.kind === "stream") {
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - p.vx * 0.05, p.y - p.vy * 0.05);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   });
 }
@@ -1596,7 +1670,7 @@ function bind() {
     if (bagTab) { bagCategory = bagTab; selectedBagKey = ""; openBag(); }
     if (listKey) listItem(listKey, Number($(`#qty-${CSS.escape(listKey)}`).value), Number($(`#price-${CSS.escape(listKey)}`).value));
     if (openListKey) openListingModal(openListKey);
-    if (sellItemKey) sellInventoryItem(sellItemKey);
+    if (sellItemKey) sellInventoryItem(sellItemKey, Number($(`#sellQty-${CSS.escape(sellItemKey)}`)?.value || 1));
     if (bagSelect) { selectedBagKey = bagSelect; openBag(); }
     if (delistId) delist(delistId);
     if (buyId) buy(buyId);
@@ -1605,7 +1679,7 @@ function bind() {
     if (bjAction === "deal") startBlackjackRound(Number($("#bjBet")?.value || 10));
     if (bjAction === "hit") blackjackHit();
     if (bjAction === "stand") blackjackStand();
-    if (bjAction === "peek") { blackjack.message = `你的牌面是 ${handValue(blackjack.player)} 点。`; openBlackjack(); }
+    if (bjAction === "peek") { blackjack.message = `你的牌面是 ${handValue(blackjack.player)} 点。${huangTaunt(handValue(blackjack.player))}`; openBlackjack(); }
   });
   window.addEventListener("resize", resize);
   window.addEventListener("storage", syncFromStorage);
