@@ -2,6 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const now = () => Date.now();
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const TAU = Math.PI * 2;
 
 const canvas = $("#farmCanvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -556,6 +557,7 @@ function draw() {
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, w, h);
   drawClouds(w);
+  drawBirds(w, h);
   drawFarmBase(w, h);
   drawPlots(w, h);
   drawParticles();
@@ -576,6 +578,29 @@ function drawClouds(w) {
   ctx.restore();
 }
 
+function drawBirds(w, h) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(58, 86, 72, 0.48)";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 7; i += 1) {
+    const speed = 18 + i * 2.4;
+    const x = ((t * speed + i * 123) % (w + 140)) - 70;
+    const y = 76 + Math.sin(t * 0.8 + i) * 10 + (i % 3) * 28;
+    const s = 0.55 + (i % 3) * 0.18;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    ctx.beginPath();
+    ctx.moveTo(-12, 0);
+    ctx.quadraticCurveTo(-5, -7 - Math.sin(t * 5 + i) * 2, 0, 0);
+    ctx.quadraticCurveTo(6, -7 + Math.sin(t * 5 + i) * 2, 13, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function drawFarmBase(w, h) {
   ctx.save();
   ctx.translate(w / 2, h * 0.54);
@@ -592,11 +617,15 @@ function drawFarmBase(w, h) {
     ctx.fillRect(x, y, 11, 3);
   }
   drawFarmDecoration(w, h);
-  const path = ctx.createLinearGradient(0, h * 0.16, 0, h * 0.34);
+  const path = ctx.createLinearGradient(0, h * 0.22, 0, h * 0.33);
   path.addColorStop(0, "#c8884c");
   path.addColorStop(1, "#a76538");
   ctx.fillStyle = path;
-  roundRect(-w * 0.46, h * 0.18, w * 0.92, h * 0.16, 30, true);
+  roundRect(-w * 0.41, h * 0.23, w * 0.82, h * 0.085, 24, true);
+  ctx.fillStyle = "rgba(255, 229, 167, .18)";
+  for (let i = 0; i < 6; i += 1) {
+    roundRect(-w * 0.33 + i * w * 0.13, h * 0.255 + Math.sin(i) * 4, 18, 5, 5, true);
+  }
   ctx.restore();
 }
 
@@ -619,7 +648,7 @@ function drawFarmDecoration(w, h) {
 function drawPlots(w, h) {
   if (!player) return;
   const cols = 4;
-  const size = Math.min((w - 42) / cols, 82);
+  const size = Math.max(58, Math.min((w - 42) / cols, 82));
   const gap = Math.min(10, size * 0.12);
   const rows = Math.ceil(12 / cols);
   const totalW = cols * size + (cols - 1) * gap;
@@ -637,38 +666,74 @@ function drawPlots(w, h) {
 function drawPlot(plot, x, y, size, index) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.fillStyle = "rgba(95,55,25,.18)";
-  roundRect(4, 8, size, size, 24, true);
-  const soil = ctx.createLinearGradient(0, 0, 0, size);
+  const skew = size * 0.14;
+  const lip = [
+    [skew, 0],
+    [size - skew, 0],
+    [size, size * 0.18],
+    [size - size * 0.07, size - size * 0.1],
+    [size * 0.07, size - size * 0.1],
+    [0, size * 0.18],
+  ];
+  const soilPoly = [
+    [skew + 6, 9],
+    [size - skew - 6, 9],
+    [size - 9, size * 0.22],
+    [size - size * 0.13, size - size * 0.18],
+    [size * 0.13, size - size * 0.18],
+    [9, size * 0.22],
+  ];
+  ctx.fillStyle = "rgba(67, 49, 21, .22)";
+  ctx.beginPath();
+  ctx.ellipse(size / 2, size * 0.55, size * 0.52, size * 0.34, 0, 0, TAU);
+  ctx.fill();
+  const lipGrad = ctx.createLinearGradient(0, 0, 0, size);
+  lipGrad.addColorStop(0, "#8bdc72");
+  lipGrad.addColorStop(1, "#3e9c52");
+  ctx.fillStyle = lipGrad;
+  drawPoly(lip, true);
+  ctx.strokeStyle = "rgba(255,255,255,.26)";
+  ctx.lineWidth = 2;
+  drawPoly(lip, false);
+  const innerShade = ctx.createLinearGradient(0, 6, 0, size);
+  innerShade.addColorStop(0, "rgba(44, 28, 12, .36)");
+  innerShade.addColorStop(0.22, "rgba(44, 28, 12, .08)");
+  innerShade.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = innerShade;
+  drawPoly(soilPoly, true);
+  const soil = ctx.createLinearGradient(0, 10, 0, size);
   soil.addColorStop(0, "#b87945");
-  soil.addColorStop(0.52, "#8e5731");
+  soil.addColorStop(0.48, "#8e5731");
   soil.addColorStop(1, "#633a22");
   ctx.fillStyle = soil;
-  roundRect(0, 0, size, size, 22, true);
-  ctx.strokeStyle = "rgba(255,239,195,.22)";
+  drawPoly(soilPoly, true);
+  ctx.save();
+  clipPoly(soilPoly);
+  ctx.strokeStyle = "rgba(255,239,195,.24)";
   ctx.lineWidth = 2;
   for (let k = 0; k < 5; k += 1) {
     ctx.beginPath();
-    ctx.moveTo(12, 14 + k * size / 6);
-    ctx.bezierCurveTo(size * 0.35, 6 + k * size / 6, size * 0.68, 22 + k * size / 6, size - 12, 14 + k * size / 6);
+    ctx.moveTo(13, 16 + k * size / 7);
+    ctx.bezierCurveTo(size * 0.34, 7 + k * size / 7, size * 0.68, 21 + k * size / 7, size - 13, 16 + k * size / 7);
     ctx.stroke();
   }
-  ctx.strokeStyle = "rgba(77,43,24,.24)";
-  ctx.lineWidth = 1;
-  roundRect(2, 2, size - 4, size - 4, 20, false);
+  ctx.restore();
+  ctx.strokeStyle = "rgba(77,43,24,.28)";
+  ctx.lineWidth = 1.5;
+  drawPoly(soilPoly, false);
   if (plot.crop) drawCrop(plot, size);
   else {
-    ctx.fillStyle = "rgba(255,255,255,.38)";
+    ctx.fillStyle = "rgba(255,255,255,.42)";
     ctx.font = `900 ${Math.max(18, size * 0.22)}px system-ui`;
     ctx.textAlign = "center";
-    ctx.fillText("+", size / 2, size / 2 + 8);
+    ctx.fillText("+", size / 2, size * 0.48 + 8);
   }
   const p = cropProgress(plot);
   if (plot.crop) {
-    ctx.fillStyle = "rgba(0,0,0,.2)";
-    roundRect(10, size - 14, size - 20, 7, 8, true);
+    ctx.fillStyle = "rgba(0,0,0,.18)";
+    roundRect(13, size - 16, size - 26, 6, 8, true);
     ctx.fillStyle = p >= 1 ? "#fff279" : "#78e06f";
-    roundRect(10, size - 14, (size - 20) * p, 7, 8, true);
+    roundRect(13, size - 16, (size - 26) * p, 6, 8, true);
   }
   ctx.restore();
 }
@@ -767,13 +832,14 @@ function drawCropShape(type, leaf, fruit, p) {
 
 function drawHudHint(w, h) {
   if (!player) return;
+  if (t > 7) return;
   ctx.save();
-  ctx.globalAlpha = 0.75;
+  ctx.globalAlpha = Math.min(0.7, (7 - t) / 2);
   ctx.fillStyle = "rgba(255,255,255,.8)";
-  roundRect(18, h - 156, Math.min(w - 36, 390), 42, 20, true);
+  roundRect(18, h - 142, Math.min(w - 36, 390), 36, 18, true);
   ctx.fillStyle = "#3b4a2f";
-  ctx.font = "800 13px system-ui";
-  ctx.fillText("点击土地：空地播种，生长期浇水，成熟后采摘，长按/右键回收", 34, h - 130);
+  ctx.font = "800 12px system-ui";
+  ctx.fillText("点击土地播种/浇水/采摘，长按回收", 34, h - 119);
   ctx.restore();
 }
 
@@ -782,6 +848,21 @@ function roundRect(x, y, w, h, r, fill) {
   ctx.roundRect(x, y, w, h, r);
   if (fill) ctx.fill();
   else ctx.stroke();
+}
+
+function drawPoly(points, fill) {
+  ctx.beginPath();
+  points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.closePath();
+  if (fill) ctx.fill();
+  else ctx.stroke();
+}
+
+function clipPoly(points) {
+  ctx.beginPath();
+  points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.closePath();
+  ctx.clip();
 }
 
 function blob(x, y, r, alpha = 1) {
@@ -799,7 +880,7 @@ function plotScreen(index) {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   const cols = 4;
-  const size = Math.min((w - 42) / cols, 82);
+  const size = Math.max(58, Math.min((w - 42) / cols, 82));
   const gap = Math.min(10, size * 0.12);
   const totalW = cols * size + (cols - 1) * gap;
   const startX = (w - totalW) / 2;
@@ -816,7 +897,7 @@ function hitPlot(clientX, clientY) {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   const cols = 4;
-  const size = Math.min((w - 42) / cols, 82);
+  const size = Math.max(58, Math.min((w - 42) / cols, 82));
   const gap = Math.min(10, size * 0.12);
   const totalW = cols * size + (cols - 1) * gap;
   const startX = (w - totalW) / 2;
