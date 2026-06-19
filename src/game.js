@@ -124,6 +124,7 @@ function blankPlayer(name = "菜园主") {
     coins: 120,
     lastSeen: now(),
     createdAt: now(),
+    updatedAt: now(),
     inventory: {},
     stats: { harvests: 0, mutations: 0, listings: 0 },
     plots: Array.from({ length: 12 }, (_, i) => ({ id: `plot-${i}`, crop: null, plantedAt: 0, growMs: 0, watered: false })),
@@ -139,6 +140,7 @@ function npcPlayer(id, name, offset = 0) {
     coins: 90 + offset % 70,
     lastSeen: now() - offset,
     createdAt: base - 600_000,
+    updatedAt: base,
     inventory: {},
     stats: { harvests: 3 + (offset % 5), mutations: 0, listings: 0 },
     plots: Array.from({ length: 12 }, (_, i) => {
@@ -166,6 +168,7 @@ function blankDb() {
     updatedAt: now(),
     players: {},
     market: {},
+    marketTombstones: {},
     events: [],
   };
 }
@@ -180,6 +183,7 @@ function safeReadDb() {
     if (!raw || raw.version !== SAVE_VERSION) return blankDb();
     raw.players ||= {};
     raw.market ||= {};
+    raw.marketTombstones ||= {};
     raw.events ||= [];
     Object.values(raw.players).forEach((p) => {
       (p.plots || []).forEach((plot) => {
@@ -196,11 +200,13 @@ function safeReadDb() {
 function commit(mutator, reason = "sync") {
   const latest = safeReadDb();
   latest.players[clientId] ||= structuredClone(player || blankPlayer());
+  latest.marketTombstones ||= {};
   ensurePublicPlayers(latest);
   mutator(latest);
   latest.rev = (latest.rev || 0) + 1;
   latest.updatedAt = now();
   latest.players[clientId].lastSeen = now();
+  if (reason !== "heartbeat") latest.players[clientId].updatedAt = now();
   latest.events = (latest.events || []).slice(-40);
   localStorage.setItem(dbKey(), JSON.stringify(latest));
   db = latest;
@@ -214,27 +220,19 @@ function commit(mutator, reason = "sync") {
 function mergePlayer(remote, local) {
   if (!remote) return structuredClone(local);
   if (!local) return remote;
+  const remoteTime = remote.updatedAt || remote.createdAt || 0;
+  const localTime = local.updatedAt || local.createdAt || 0;
+  const latest = localTime >= remoteTime ? local : remote;
+  const older = latest === local ? remote : local;
   return {
-    ...remote,
-    ...local,
-    coins: Math.max(Number(remote.coins || 0), Number(local.coins || 0)),
-    inventory: mergeInventory(remote.inventory, local.inventory),
+    ...older,
+    ...latest,
+    inventory: { ...(latest.inventory || {}) },
     plots: chooseNewestPlots(remote.plots, local.plots),
-    stats: {
-      harvests: Math.max(remote.stats?.harvests || 0, local.stats?.harvests || 0),
-      mutations: Math.max(remote.stats?.mutations || 0, local.stats?.mutations || 0),
-      listings: Math.max(remote.stats?.listings || 0, local.stats?.listings || 0),
-    },
+    stats: { ...(latest.stats || {}) },
     lastSeen: Math.max(remote.lastSeen || 0, local.lastSeen || 0),
+    updatedAt: Math.max(remoteTime, localTime),
   };
-}
-
-function mergeInventory(a = {}, b = {}) {
-  const out = { ...a };
-  Object.entries(b).forEach(([key, value]) => {
-    out[key] = Math.max(Number(out[key] || 0), Number(value || 0));
-  });
-  return out;
 }
 
 function chooseNewestPlots(a = [], b = []) {
@@ -251,6 +249,7 @@ function normalizeDb(value) {
   if (!value || value.version !== SAVE_VERSION) return null;
   value.players ||= {};
   value.market ||= {};
+  value.marketTombstones ||= {};
   value.events ||= [];
   ensurePublicPlayers(value);
   return value;
@@ -266,6 +265,7 @@ function mergeDb(remote, local) {
     updatedAt: Math.max(base.updatedAt || 0, mine.updatedAt || 0),
     players: { ...(base.players || {}) },
     market: { ...(base.market || {}) },
+    marketTombstones: { ...(base.marketTombstones || {}) },
     events: [],
   };
   Object.entries(mine.players || {}).forEach(([id, p]) => {
@@ -273,7 +273,14 @@ function mergeDb(remote, local) {
   });
   Object.entries(mine.market || {}).forEach(([id, listing]) => {
     const current = out.market[id];
-    if (!current || (listing.createdAt || 0) >= (current.createdAt || 0)) out.market[id] = listing;
+    if (!current || (listing.updatedAt || listing.createdAt || 0) >= (current.updatedAt || current.createdAt || 0)) out.market[id] = listing;
+  });
+  Object.entries(mine.marketTombstones || {}).forEach(([id, time]) => {
+    out.marketTombstones[id] = Math.max(out.marketTombstones[id] || 0, time || 0);
+  });
+  Object.entries(out.marketTombstones).forEach(([id, deletedAt]) => {
+    const listingTime = out.market[id]?.updatedAt || out.market[id]?.createdAt || 0;
+    if (deletedAt >= listingTime) delete out.market[id];
   });
   const events = [...(base.events || []), ...(mine.events || [])];
   const seen = new Set();
@@ -488,7 +495,7 @@ function listItem(key, qty, price) {
     p.inventory[key] -= qty;
     if (p.inventory[key] <= 0) delete p.inventory[key];
     const id = uid();
-    draft.market[id] = { id, sellerId: clientId, sellerName: p.name, item: key, qty, price, createdAt: now() };
+    draft.market[id] = { id, sellerId: clientId, sellerName: p.name, item: key, qty, price, createdAt: now(), updatedAt: now() };
     p.stats.listings += 1;
     draft.events.push({ id: uid(), time: now(), text: `${p.name} 上架了 ${qty} 个${itemName(key)}` });
   }, "list");
@@ -500,6 +507,7 @@ function delist(id) {
   if (!listing || listing.sellerId !== clientId) return toast("只能下架自己的商品");
   commit((draft) => {
     delete draft.market[id];
+    draft.marketTombstones[id] = now();
     const p = draft.players[clientId];
     p.inventory[listing.item] = (p.inventory[listing.item] || 0) + listing.qty;
   }, "delist");
@@ -510,15 +518,18 @@ function buy(id) {
   const listing = db.market[id];
   if (!listing) return toast("商品已不存在");
   if (listing.sellerId === clientId) return toast("不能购买自己的商品");
-  if (player.coins < listing.price) return toast("金币不足");
+  const totalPrice = listing.price * listing.qty;
+  if (player.coins < totalPrice) return toast("金币不足");
   commit((draft) => {
     const buyer = draft.players[clientId];
     const seller = draft.players[listing.sellerId] || { ...blankPlayer(listing.sellerName), id: listing.sellerId };
-    buyer.coins -= listing.price;
+    buyer.coins -= totalPrice;
     buyer.inventory[listing.item] = (buyer.inventory[listing.item] || 0) + listing.qty;
-    seller.coins = (seller.coins || 0) + listing.price;
+    seller.coins = (seller.coins || 0) + totalPrice;
+    seller.updatedAt = now();
     draft.players[listing.sellerId] = seller;
     delete draft.market[id];
+    draft.marketTombstones[id] = now();
     draft.events.push({ id: uid(), time: now(), text: `${buyer.name} 购买了 ${listing.qty} 个${itemName(listing.item)}` });
   }, "buy");
   openMarket();
@@ -601,6 +612,7 @@ function digPlayerPlot(targetId, plotIndex) {
     const t = draft.players[targetId];
     t.plots[plotIndex].dugUntil = now() + DIG_COOLDOWN;
     t.plots[plotIndex].updatedAt = now();
+    t.updatedAt = now();
     draft.events.push({ id: uid(), time: now(), text: `${draft.players[clientId].name} 刨了 ${t.name} 的地` });
   }, "dig-plot");
   toast(`已刨 ${target.name} 的地，冷却 5 分钟`);
@@ -622,6 +634,7 @@ function stealPlayerCrop(targetId, plotIndex) {
     thief.inventory[itemKey] = (thief.inventory[itemKey] || 0) + 1;
     thief.stats.harvests += 1;
     victim.plots[plotIndex] = { id: `plot-${plotIndex}`, crop: null, plantedAt: 0, growMs: 0, watered: false, updatedAt: now() };
+    victim.updatedAt = now();
     draft.events.push({ id: uid(), time: now(), text: `${thief.name} 偷走了 ${victim.name} 的${itemName(itemKey)}` });
   }, "steal-crop");
   toast(`偷到 ${target.name} 的${itemName(itemKey)}，已进背包`);
@@ -860,6 +873,7 @@ function handValue(cards) {
 }
 
 function startBlackjackRound(bet) {
+  if (blackjack && ["player", "dealer"].includes(blackjack.phase)) return toast("这一局还没结束，先要牌或停牌");
   bet = Math.max(1, Math.floor(bet));
   if (player.coins < bet) return toast("金币不足，无法下注");
   const deck = makeDeck();
@@ -877,12 +891,21 @@ function startBlackjackRound(bet) {
   };
   commit((draft) => { draft.players[clientId].coins -= bet; }, "blackjack-bet");
   playSound("shuffle");
+  const pv = handValue(blackjack.player);
+  const dv = handValue(blackjack.dealer);
+  if (pv === 21 || dv === 21) {
+    if (pv === 21 && dv === 21) settleBlackjack("push");
+    else settleBlackjack(pv === 21 ? "win" : "lose");
+    return;
+  }
   openBlackjack();
 }
 
 function blackjackHit() {
   if (!blackjack || blackjack.phase !== "player") return;
-  blackjack.player.push(blackjack.deck.pop());
+  const card = blackjack.deck.pop();
+  if (!card) return blackjackStand();
+  blackjack.player.push(card);
   blackjack.fx = "hit";
   blackjack.message = `你拿到一张新牌。${huangTaunt(handValue(blackjack.player))}`;
   playSound("deal");
@@ -940,7 +963,7 @@ function renderBlackjack() {
         </div>
         <div class="bet-row">
           <label>下注<input id="bjBet" inputmode="numeric" value="${b.bet || 10}" ${b.phase !== "idle" && b.phase !== "done" ? "disabled" : ""}></label>
-          <button class="market-action primary-action" data-bj="deal">${b.phase === "done" ? "再来一局" : "发牌"}</button>
+          <button class="market-action primary-action" data-bj="deal" ${b.phase === "player" || b.phase === "dealer" ? "disabled" : ""}>${b.phase === "done" ? "再来一局" : "发牌"}</button>
         </div>
       </div>
       <div class="bj-scorebar">
@@ -1000,7 +1023,8 @@ function openMarket(filter = "") {
         ${selected ? `
           <div class="item-title"><span class="item-icon">${itemIcon(selected.item)}</span><div><strong>${itemName(selected.item)}</strong><p>${selected.sellerName} · ${timeAgo(selected.createdAt)}上架</p></div></div>
           <span class="chip">数量 ×${selected.qty}</span>
-          <span class="chip">价格 ${selected.price} 金币</span>
+          <span class="chip">单价 ${selected.price} 金币</span>
+          <span class="chip">总价 ${selected.price * selected.qty} 金币</span>
           ${selected.sellerId === clientId
             ? `<button class="market-action" data-delist="${selected.id}">下架</button>`
             : `<button class="market-action primary-action" data-buy="${selected.id}">购买</button>`}
