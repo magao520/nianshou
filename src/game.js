@@ -21,6 +21,8 @@ const listingPrice = $("#listingPrice");
 const SAVE_VERSION = 7;
 const CLIENT_KEY = "cloudFarm.clientId.v1";
 const LOCAL_PLAYER_KEY = "cloudFarm.player.v1";
+const ONLINE_API = "https://mantledb.sh/v2/nianshou-cloud-farm-public-v1/state";
+const ONLINE_POLL_MS = 2500;
 const MUTATION_RATE = 1 / 1000;
 const ONLINE_WINDOW = 90_000;
 const RECENT_WINDOW = 10 * 60_000;
@@ -85,6 +87,9 @@ let bagCategory = "crops";
 let selectedListingId = "";
 let selectedPlayerId = "";
 let playerFilter = "all";
+let onlineStatus = "连接中";
+let onlineBusy = false;
+let onlineQueued = false;
 let lotterySpinning = false;
 let lotteryReels = ["🥕", "🌽", "🍅"];
 let lotteryMessage = "10 金币摇一次，奖品会进入背包奖品页。";
@@ -147,11 +152,10 @@ function npcPlayer(id, name, offset = 0) {
 }
 
 function ensurePublicPlayers(draft) {
-  const existingOthers = Object.keys(draft.players || {}).filter((id) => id !== clientId && !id.startsWith("npc-"));
-  if (existingOthers.length || Object.keys(draft.players || {}).some((id) => id.startsWith("npc-"))) return;
-  draft.players["npc-wang"] = npcPlayer("npc-wang", "老王", 18_000);
-  draft.players["npc-mai"] = npcPlayer("npc-mai", "小麦", 52_000);
-  draft.players["npc-a-cai"] = npcPlayer("npc-a-cai", "阿菜", 240_000);
+  if (!draft?.players) return;
+  Object.keys(draft.players).forEach((id) => {
+    if (id.startsWith("npc-")) delete draft.players[id];
+  });
 }
 
 function blankDb() {
@@ -182,6 +186,7 @@ function safeReadDb() {
         if (plot.crop && crops[plot.crop] && plot.growMs < crops[plot.crop].growMs) plot.growMs = crops[plot.crop].growMs;
       });
     });
+    ensurePublicPlayers(raw);
     return raw;
   } catch {
     return blankDb();
@@ -202,6 +207,7 @@ function commit(mutator, reason = "sync") {
   player = latest.players[clientId];
   localStorage.setItem(LOCAL_PLAYER_KEY, JSON.stringify({ name: player.name, room }));
   broadcast?.postMessage({ room, rev: db.rev, reason });
+  pushOnline(reason);
   renderAll();
 }
 
@@ -241,11 +247,120 @@ function chooseNewestPlots(a = [], b = []) {
   });
 }
 
-function start() {
+function normalizeDb(value) {
+  if (!value || value.version !== SAVE_VERSION) return null;
+  value.players ||= {};
+  value.market ||= {};
+  value.events ||= [];
+  ensurePublicPlayers(value);
+  return value;
+}
+
+function mergeDb(remote, local) {
+  const base = normalizeDb(remote) || blankDb();
+  const mine = normalizeDb(local) || blankDb();
+  const out = {
+    ...base,
+    ...mine,
+    rev: Math.max(base.rev || 0, mine.rev || 0),
+    updatedAt: Math.max(base.updatedAt || 0, mine.updatedAt || 0),
+    players: { ...(base.players || {}) },
+    market: { ...(base.market || {}) },
+    events: [],
+  };
+  Object.entries(mine.players || {}).forEach(([id, p]) => {
+    out.players[id] = mergePlayer(base.players?.[id], p);
+  });
+  Object.entries(mine.market || {}).forEach(([id, listing]) => {
+    const current = out.market[id];
+    if (!current || (listing.createdAt || 0) >= (current.createdAt || 0)) out.market[id] = listing;
+  });
+  const events = [...(base.events || []), ...(mine.events || [])];
+  const seen = new Set();
+  out.events = events
+    .filter((event) => event && !seen.has(event.id) && seen.add(event.id))
+    .sort((a, b) => (a.time || 0) - (b.time || 0))
+    .slice(-40);
+  ensurePublicPlayers(out);
+  return out;
+}
+
+async function fetchOnlineDb() {
+  const res = await fetch(`${ONLINE_API}?t=${Date.now()}`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`online read ${res.status}`);
+  return normalizeDb(await res.json());
+}
+
+async function writeOnlineDb(value) {
+  const res = await fetch(ONLINE_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(value),
+  });
+  if (!res.ok) throw new Error(`online write ${res.status}`);
+}
+
+async function pullOnline({ silent = false } = {}) {
+  try {
+    const remote = await fetchOnlineDb();
+    if (!remote) {
+      onlineStatus = "远端初始化";
+      return false;
+    }
+    const merged = mergeDb(remote, safeReadDb());
+    localStorage.setItem(dbKey(), JSON.stringify(merged));
+    db = merged;
+    player = db.players[clientId] ? mergePlayer(db.players[clientId], player) : player;
+    if (player) db.players[clientId] = player;
+    onlineStatus = "联机";
+    if (!silent) renderAll();
+    return true;
+  } catch (error) {
+    onlineStatus = "离线";
+    console.warn("online pull failed", error);
+    if (!silent) renderAll();
+    return false;
+  }
+}
+
+async function pushOnline(reason = "sync") {
+  if (onlineBusy) {
+    onlineQueued = true;
+    return;
+  }
+  onlineBusy = true;
+  try {
+    const remote = await fetchOnlineDb().catch(() => null);
+    const merged = mergeDb(remote, safeReadDb());
+    merged.rev = Math.max(merged.rev || 0, db?.rev || 0) + 1;
+    merged.updatedAt = now();
+    localStorage.setItem(dbKey(), JSON.stringify(merged));
+    await writeOnlineDb(merged);
+    db = merged;
+    player = db.players[clientId];
+    onlineStatus = "联机";
+    renderAll();
+  } catch (error) {
+    onlineStatus = "离线";
+    console.warn("online push failed", reason, error);
+    renderAll();
+  } finally {
+    onlineBusy = false;
+    if (onlineQueued) {
+      onlineQueued = false;
+      pushOnline("queued");
+    }
+  }
+}
+
+async function start() {
   room = "PUBLIC-FARM";
   const saved = JSON.parse(localStorage.getItem(LOCAL_PLAYER_KEY) || "null");
   const name = ($("#playerName").value || saved?.name || "菜园主").trim().slice(0, 14);
   db = safeReadDb();
+  await pullOnline({ silent: true });
+  db = mergeDb(db, safeReadDb());
   player = db.players[clientId] ? structuredClone(db.players[clientId]) : blankPlayer(name);
   player.name = name;
   entry.classList.remove("active");
@@ -271,6 +386,11 @@ function syncFromStorage() {
     db.players[clientId] = player;
     renderAll();
   }
+}
+
+async function syncFromOnline() {
+  if (!player || onlineBusy) return;
+  await pullOnline();
 }
 
 function heartbeat() {
@@ -521,7 +641,8 @@ function renderAll() {
   if (!player) return;
   $("#coinText").textContent = player.coins;
   $("#bagText").textContent = Object.values(player.inventory || {}).reduce((a, b) => a + b, 0);
-  $("#syncText").textContent = `全服 ${db.rev || 0}`;
+  const realPlayers = Object.values(db.players || {}).filter((p) => !p.id?.startsWith("npc-"));
+  $("#syncText").textContent = `${onlineStatus} ${realPlayers.length}`;
   renderSeeds();
   if (!sheet.classList.contains("hidden")) openPanel(activePanel);
 }
@@ -1730,3 +1851,4 @@ renderSeeds();
 requestAnimationFrame(loop);
 setInterval(heartbeat, 12_000);
 setInterval(syncFromStorage, 5_000);
+setInterval(syncFromOnline, ONLINE_POLL_MS);
