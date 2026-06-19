@@ -24,6 +24,7 @@ const LOCAL_PLAYER_KEY = "cloudFarm.player.v1";
 const MUTATION_RATE = 1 / 1000;
 const ONLINE_WINDOW = 90_000;
 const RECENT_WINDOW = 10 * 60_000;
+const DIG_COOLDOWN = 5 * 60_000;
 const art = {};
 const CARD_BASE = "./assets/vendor/kenney/cards/";
 const AUDIO = {
@@ -83,6 +84,7 @@ let selectedBagKey = "";
 let bagCategory = "crops";
 let selectedListingId = "";
 let selectedPlayerId = "";
+let playerFilter = "all";
 let lotterySpinning = false;
 let lotteryReels = ["🥕", "🌽", "🍅"];
 let lotteryMessage = "10 金币摇一次，奖品会进入背包奖品页。";
@@ -123,6 +125,35 @@ function blankPlayer(name = "菜园主") {
   };
 }
 
+function npcPlayer(id, name, offset = 0) {
+  const cropKeys = Object.keys(crops);
+  const base = now() - offset;
+  return {
+    id,
+    name,
+    coins: 90 + offset % 70,
+    lastSeen: now() - offset,
+    createdAt: base - 600_000,
+    inventory: {},
+    stats: { harvests: 3 + (offset % 5), mutations: 0, listings: 0 },
+    plots: Array.from({ length: 12 }, (_, i) => {
+      if (i % 4 === 3) return { id: `plot-${i}`, crop: null, plantedAt: 0, growMs: 0, watered: false, updatedAt: base };
+      const crop = cropKeys[(i + offset) % cropKeys.length];
+      const growMs = crops[crop].growMs;
+      const age = i % 3 === 0 ? growMs + 90_000 : growMs * (0.25 + (i % 5) * 0.12);
+      return { id: `plot-${i}`, crop, plantedAt: now() - age, growMs, watered: i % 2 === 0, updatedAt: base };
+    }),
+  };
+}
+
+function ensurePublicPlayers(draft) {
+  const existingOthers = Object.keys(draft.players || {}).filter((id) => id !== clientId && !id.startsWith("npc-"));
+  if (existingOthers.length || Object.keys(draft.players || {}).some((id) => id.startsWith("npc-"))) return;
+  draft.players["npc-wang"] = npcPlayer("npc-wang", "老王", 18_000);
+  draft.players["npc-mai"] = npcPlayer("npc-mai", "小麦", 52_000);
+  draft.players["npc-a-cai"] = npcPlayer("npc-a-cai", "阿菜", 240_000);
+}
+
 function blankDb() {
   return {
     version: SAVE_VERSION,
@@ -160,6 +191,7 @@ function safeReadDb() {
 function commit(mutator, reason = "sync") {
   const latest = safeReadDb();
   latest.players[clientId] ||= structuredClone(player || blankPlayer());
+  ensurePublicPlayers(latest);
   mutator(latest);
   latest.rev = (latest.rev || 0) + 1;
   latest.updatedAt = now();
@@ -223,6 +255,7 @@ function start() {
     broadcast.onmessage = syncFromStorage;
   } catch {}
   commit((draft) => {
+    ensurePublicPlayers(draft);
     draft.players[clientId] = player;
     draft.events.push({ id: uid(), time: now(), text: `${player.name} 进入了菜园` });
   }, "enter");
@@ -253,9 +286,19 @@ function cropProgress(plot) {
   return clamp((now() - plot.plantedAt) * bonus / plot.growMs, 0, 1);
 }
 
+function plotLocked(plot) {
+  return (plot.dugUntil || 0) > now();
+}
+
+function lockText(plot) {
+  const left = Math.ceil(((plot.dugUntil || 0) - now()) / 60000);
+  return left > 0 ? `${left}分钟` : "";
+}
+
 function plant(plotIndex) {
   const crop = crops[selectedCrop];
   const plot = player.plots[plotIndex];
+  if (plotLocked(plot)) return toast(`这块地被刨了，冷却还剩 ${lockText(plot)}`);
   if (plot.crop) return toast("这块地已经种上了");
   if (player.coins < crop.seedCost) return toast("金币不够买种子");
   commit((draft) => {
@@ -269,6 +312,7 @@ function plant(plotIndex) {
 
 function water(plotIndex) {
   const plot = player.plots[plotIndex];
+  if (plotLocked(plot)) return toast(`这块地被刨了，冷却还剩 ${lockText(plot)}`);
   if (!plot.crop) return toast("空地不用浇水");
   if (plot.watered) return toast("这块地已经浇过水");
   commit((draft) => {
@@ -281,6 +325,7 @@ function water(plotIndex) {
 
 function harvest(plotIndex) {
   const plot = player.plots[plotIndex];
+  if (plotLocked(plot)) return toast(`这块地被刨了，冷却还剩 ${lockText(plot)}`);
   if (!plot.crop) return toast("这块地是空的");
   const progress = cropProgress(plot);
   if (progress < 1) return toast(`还没成熟：${Math.floor(progress * 100)}%`);
@@ -302,6 +347,7 @@ function harvest(plotIndex) {
 
 function recycle(plotIndex) {
   const plot = player.plots[plotIndex];
+  if (plotLocked(plot)) return toast(`这块地被刨了，冷却还剩 ${lockText(plot)}`);
   if (!plot.crop) return toast("空地不用回收");
   commit((draft) => {
     draft.players[clientId].plots[plotIndex] = { id: `plot-${plotIndex}`, crop: null, plantedAt: 0, growMs: 0, watered: false, updatedAt: now() };
@@ -408,6 +454,60 @@ function sellInventoryItem(key, qty = player.inventory[key] || 0) {
   if (activePanel === "bag") openBag();
 }
 
+function recycleInventoryItem(key, qty = player.inventory[key] || 0) {
+  qty = Math.max(1, Math.floor(qty));
+  if (!isPrize(key)) return toast("只有奖品可以回收");
+  if (!player.inventory[key] || player.inventory[key] < qty) return toast("库存不足");
+  const earned = Math.max(1, Math.floor(defaultPrice(key) * 0.25)) * qty;
+  commit((draft) => {
+    const p = draft.players[clientId];
+    p.inventory[key] -= qty;
+    if (p.inventory[key] <= 0) delete p.inventory[key];
+    p.coins += earned;
+    draft.events.push({ id: uid(), time: now(), text: `${p.name} 回收了 ${qty} 个${itemName(key)}` });
+  }, "recycle-prize");
+  toast(`回收 ${qty} 个${itemName(key)}，获得 ${earned} 金币`);
+  if (activePanel === "bag") openBag();
+}
+
+function digPlayerPlot(targetId, plotIndex) {
+  if (targetId === clientId) return toast("不能刨自己的地");
+  const target = db.players[targetId];
+  if (!target) return toast("玩家不存在");
+  const plot = target.plots?.[plotIndex];
+  if (!plot) return toast("地块不存在");
+  if (plotLocked(plot)) return toast(`这块地已经冷却中，还剩 ${lockText(plot)}`);
+  commit((draft) => {
+    const t = draft.players[targetId];
+    t.plots[plotIndex].dugUntil = now() + DIG_COOLDOWN;
+    t.plots[plotIndex].updatedAt = now();
+    draft.events.push({ id: uid(), time: now(), text: `${draft.players[clientId].name} 刨了 ${t.name} 的地` });
+  }, "dig-plot");
+  toast(`已刨 ${target.name} 的地，冷却 5 分钟`);
+  openPlayers();
+}
+
+function stealPlayerCrop(targetId, plotIndex) {
+  if (targetId === clientId) return toast("不能偷自己的菜");
+  const target = db.players[targetId];
+  if (!target) return toast("玩家不存在");
+  const plot = target.plots?.[plotIndex];
+  if (!plot?.crop) return toast("这块地没有菜可偷");
+  if (plotLocked(plot)) return toast(`这块地冷却中，还剩 ${lockText(plot)}`);
+  if (cropProgressFor(plot) < 1) return toast("这棵菜还没成熟，偷不了");
+  const itemKey = plot.crop;
+  commit((draft) => {
+    const thief = draft.players[clientId];
+    const victim = draft.players[targetId];
+    thief.inventory[itemKey] = (thief.inventory[itemKey] || 0) + 1;
+    thief.stats.harvests += 1;
+    victim.plots[plotIndex] = { id: `plot-${plotIndex}`, crop: null, plantedAt: 0, growMs: 0, watered: false, updatedAt: now() };
+    draft.events.push({ id: uid(), time: now(), text: `${thief.name} 偷走了 ${victim.name} 的${itemName(itemKey)}` });
+  }, "steal-crop");
+  toast(`偷到 ${target.name} 的${itemName(itemKey)}，已进背包`);
+  openPlayers();
+}
+
 function sellInventoryCrops() {
   const rows = Object.entries(player.inventory || {}).filter(([key]) => !isPrize(key));
   if (!rows.length) return toast("暂无成熟地块，也没有可出售的背包蔬菜");
@@ -479,6 +579,7 @@ function openBag() {
         <div class="item-title"><span class="item-icon">${itemIcon(selectedBagKey)}</span><div><strong>${itemName(selectedBagKey)}</strong><p>${itemDescription(selectedBagKey)}</p></div></div>
         <span class="chip">库存 ×${selectedQty}</span>
         ${!isPrize(selectedBagKey) ? `<div class="sell-row"><input id="sellQty-${selectedBagKey}" inputmode="numeric" value="1" min="1" max="${selectedQty}" aria-label="出售数量" /><button class="market-action" data-sell-item="${selectedBagKey}">出售选定数量</button></div>` : ""}
+        ${isPrize(selectedBagKey) ? `<div class="sell-row"><input id="recycleQty-${selectedBagKey}" inputmode="numeric" value="1" min="1" max="${selectedQty}" aria-label="回收数量" /><button class="market-action" data-recycle-item="${selectedBagKey}">回收奖品</button></div>` : ""}
         <button class="market-action primary-action" data-open-list="${selectedBagKey}">上架</button>
       </div>
     </div>
@@ -790,7 +891,10 @@ function openMarket(filter = "") {
 
 function openPlayers() {
   sheetTitle.textContent = "玩家";
-  const players = Object.values(db.players || {}).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+  ensurePublicPlayers(db);
+  const players = Object.values(db.players || {})
+    .filter((p) => playerFilter === "all" || (playerFilter === "others" ? p.id !== clientId : p.id === clientId))
+    .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
   if (!selectedPlayerId || !db.players[selectedPlayerId]) selectedPlayerId = players[0]?.id || "";
   const detail = db.players[selectedPlayerId];
   const list = players.map((p) => {
@@ -810,9 +914,23 @@ function openPlayers() {
   const ready = detail ? (detail.plots || []).filter((plot) => plot.crop && cropProgressFor(plot) >= 1).length : 0;
   const progressList = detail ? (detail.plots || []).filter((plot) => plot.crop).map((plot) => cropProgressFor(plot)) : [];
   const maturity = progressList.length ? Math.round(progressList.reduce((a, b) => a + b, 0) / progressList.length * 100) : 0;
+  const plotCards = detail ? (detail.plots || []).map((plot, index) => {
+    const locked = plotLocked(plot);
+    const ready = plot.crop && cropProgressFor(plot) >= 1;
+    const disabled = detail.id === clientId || locked;
+    return `
+      <div class="target-plot ${locked ? "locked" : ""}">
+        <span>${plot.crop ? `${itemIcon(plot.crop)} ${itemName(plot.crop)}` : "空地"}</span>
+        <small>${locked ? `冷却 ${lockText(plot)}` : plot.crop ? `${Math.round(cropProgressFor(plot) * 100)}%` : "可播种"}</small>
+        <button class="mini-action" data-steal="${detail.id}:${index}" ${!ready || disabled ? "disabled" : ""}>偷菜</button>
+        <button class="mini-action danger" data-dig="${detail.id}:${index}" ${disabled ? "disabled" : ""}>刨地</button>
+      </div>
+    `;
+  }).join("") : "";
   sheetBody.innerHTML = `
+    <div class="tabs"><button class="${playerFilter === "all" ? "active" : ""}" data-player-filter="all">全部玩家</button><button class="${playerFilter === "others" ? "active" : ""}" data-player-filter="others">只看别人</button></div>
     <div class="two-pane">
-      <div class="pane-list">${list}</div>
+      <div class="pane-list">${list || `<div class="card-row"><div><strong>暂无其他玩家</strong><p>公共菜园会自动补充几个可互动玩家。</p></div></div>`}</div>
       <div class="pane-detail">
         ${detail ? `
           <strong>${detail.name}${detail.id === clientId ? "（你）" : ""}</strong>
@@ -821,6 +939,7 @@ function openPlayers() {
           <p>平均成熟：${maturity}%</p>
           <p>可采摘：${ready} 棵</p>
           <p>累计采摘：${detail.stats?.harvests || 0} 次</p>
+          <div class="target-grid">${plotCards}</div>
         ` : `<strong>暂无玩家</strong>`}
       </div>
     </div>
@@ -920,7 +1039,6 @@ function draw() {
   drawClouds(w);
   drawBirds(w, h);
   drawFarmBase(w, h);
-  drawAnimals(w, h);
   drawPlots(w, h);
   drawParticles();
   drawHudHint(w, h);
@@ -1038,103 +1156,6 @@ function drawFarmDecoration(w, h) {
   drawImg("cornDouble", w * 0.38, -h * 0.02, 64);
 }
 
-function drawAnimals(w, h) {
-  const baseY = h * 0.64;
-  const cowX = 42 + Math.abs(Math.sin(t * 0.34)) * (w - 108);
-  const sheepX = w - 54 - Math.abs(Math.sin(t * 0.28 + 1.4)) * (w - 120);
-  const chickenX = 76 + ((t * 28) % Math.max(120, w - 150));
-  drawCow(cowX, baseY, Math.sin(t * 0.34) > 0 ? 1 : -1);
-  drawSheep(sheepX, baseY + 56, Math.sin(t * 0.28 + 1.4) > 0 ? -1 : 1);
-  drawChicken(chickenX, baseY + 112, 1);
-}
-
-function drawCow(x, y, dir = 1) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(dir * 0.72, 0.72);
-  ctx.fillStyle = "rgba(45, 70, 32, .16)";
-  ctx.beginPath();
-  ctx.ellipse(0, 20, 34, 8, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = "#fff7ea";
-  roundRect(-30, -12, 52, 26, 12, true);
-  ctx.fillStyle = "#60412b";
-  ctx.beginPath();
-  ctx.ellipse(-12, -2, 10, 8, -0.3, 0, TAU);
-  ctx.ellipse(10, 6, 8, 7, 0.4, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = "#fff7ea";
-  roundRect(18, -18, 24, 21, 10, true);
-  ctx.fillStyle = "#f2a6a6";
-  ctx.beginPath();
-  ctx.ellipse(33, -5, 9, 6, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = "#31271e";
-  ctx.fillRect(-22, 12, 5, 14);
-  ctx.fillRect(9, 12, 5, 14);
-  ctx.fillRect(29, 0, 3, 3);
-  ctx.restore();
-}
-
-function drawSheep(x, y, dir = 1) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(dir * 0.66, 0.66);
-  ctx.fillStyle = "rgba(45, 70, 32, .16)";
-  ctx.beginPath();
-  ctx.ellipse(0, 18, 30, 8, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = "#fffdf2";
-  [-18, -5, 8, 19].forEach((cx, i) => {
-    ctx.beginPath();
-    ctx.arc(cx, -4 + Math.sin(i) * 2, 14, 0, TAU);
-    ctx.fill();
-  });
-  ctx.fillStyle = "#5d5042";
-  roundRect(22, -12, 18, 18, 8, true);
-  ctx.fillRect(-18, 9, 5, 12);
-  ctx.fillRect(9, 9, 5, 12);
-  ctx.fillStyle = "#201a15";
-  ctx.fillRect(31, -5, 3, 3);
-  ctx.restore();
-}
-
-function drawChicken(x, y, dir = 1) {
-  ctx.save();
-  ctx.translate(x, y + Math.sin(t * 8) * 1.5);
-  ctx.scale(dir * 0.55, 0.55);
-  ctx.fillStyle = "rgba(45, 70, 32, .14)";
-  ctx.beginPath();
-  ctx.ellipse(0, 17, 18, 5, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = "#fff5d8";
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 17, 20, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = "#f04e3e";
-  ctx.beginPath();
-  ctx.arc(2, -19, 5, 0, TAU);
-  ctx.arc(-5, -18, 4, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = "#ffb23f";
-  ctx.beginPath();
-  ctx.moveTo(15, -4);
-  ctx.lineTo(27, 1);
-  ctx.lineTo(15, 6);
-  ctx.fill();
-  ctx.strokeStyle = "#a66a24";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-5, 18);
-  ctx.lineTo(-8, 28);
-  ctx.moveTo(7, 18);
-  ctx.lineTo(10, 28);
-  ctx.stroke();
-  ctx.fillStyle = "#2e241b";
-  ctx.fillRect(9, -8, 3, 3);
-  ctx.restore();
-}
-
 function drawPlots(w, h) {
   if (!player) return;
   const cols = 4;
@@ -1211,6 +1232,16 @@ function drawPlot(plot, x, y, size, index) {
   ctx.strokeStyle = "rgba(77,43,24,.28)";
   ctx.lineWidth = 1.5;
   drawPoly(soilPoly, false);
+  if (plotLocked(plot)) {
+    ctx.fillStyle = "rgba(45, 35, 25, .48)";
+    drawPoly(soilPoly, true);
+    ctx.fillStyle = "#fff2a8";
+    ctx.font = `900 ${Math.max(11, size * 0.16)}px system-ui`;
+    ctx.textAlign = "center";
+    ctx.fillText(`冷却${lockText(plot)}`, size / 2, size * 0.5);
+    ctx.restore();
+    return;
+  }
   if (plot.crop) drawCrop(plot, size);
   else {
     ctx.fillStyle = "rgba(255,255,255,.42)";
@@ -1660,22 +1691,30 @@ function bind() {
     const listKey = event.target.closest("[data-list]")?.dataset.list;
     const openListKey = event.target.closest("[data-open-list]")?.dataset.openList;
     const sellItemKey = event.target.closest("[data-sell-item]")?.dataset.sellItem;
+    const recycleItemKey = event.target.closest("[data-recycle-item]")?.dataset.recycleItem;
     const bagSelect = event.target.closest("[data-bag-select]")?.dataset.bagSelect;
     const delistId = event.target.closest("[data-delist]")?.dataset.delist;
     const buyId = event.target.closest("[data-buy]")?.dataset.buy;
     const marketSelect = event.target.closest("[data-market-select]")?.dataset.marketSelect;
     const playerSelect = event.target.closest("[data-player-select]")?.dataset.playerSelect;
+    const playerFilterKey = event.target.closest("[data-player-filter]")?.dataset.playerFilter;
+    const stealTarget = event.target.closest("[data-steal]")?.dataset.steal;
+    const digTarget = event.target.closest("[data-dig]")?.dataset.dig;
     const bjAction = event.target.closest("[data-bj]")?.dataset.bj;
     if (event.target.closest("#spinLottery")) spinLottery();
     if (bagTab) { bagCategory = bagTab; selectedBagKey = ""; openBag(); }
     if (listKey) listItem(listKey, Number($(`#qty-${CSS.escape(listKey)}`).value), Number($(`#price-${CSS.escape(listKey)}`).value));
     if (openListKey) openListingModal(openListKey);
     if (sellItemKey) sellInventoryItem(sellItemKey, Number($(`#sellQty-${CSS.escape(sellItemKey)}`)?.value || 1));
+    if (recycleItemKey) recycleInventoryItem(recycleItemKey, Number($(`#recycleQty-${CSS.escape(recycleItemKey)}`)?.value || 1));
     if (bagSelect) { selectedBagKey = bagSelect; openBag(); }
     if (delistId) delist(delistId);
     if (buyId) buy(buyId);
     if (marketSelect) { selectedListingId = marketSelect; openMarket($("#marketSearch")?.value.trim() || ""); }
     if (playerSelect) { selectedPlayerId = playerSelect; openPlayers(); }
+    if (playerFilterKey) { playerFilter = playerFilterKey; selectedPlayerId = ""; openPlayers(); }
+    if (stealTarget) { const [id, index] = stealTarget.split(":"); stealPlayerCrop(id, Number(index)); }
+    if (digTarget) { const [id, index] = digTarget.split(":"); digPlayerPlot(id, Number(index)); }
     if (bjAction === "deal") startBlackjackRound(Number($("#bjBet")?.value || 10));
     if (bjAction === "hit") blackjackHit();
     if (bjAction === "stand") blackjackStand();

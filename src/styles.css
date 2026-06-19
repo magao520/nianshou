@@ -566,6 +566,47 @@ h1 {
   text-align: center;
 }
 
+.target-grid {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.target-plot {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.62);
+}
+
+.target-plot small {
+  grid-column: 1 / -1;
+  color: rgba(38,48,37,.68);
+  font-weight: 800;
+}
+
+.target-plot.locked {
+  background: rgba(70, 54, 37, .2);
+}
+
+.mini-action {
+  min-width: 48px;
+  padding: 7px 8px !important;
+  border-radius: 12px !important;
+  font-size: 12px;
+}
+
+.mini-action.danger {
+  background: linear-gradient(180deg, #ffd0b1, #ff9b75);
+}
+
+.mini-action:disabled {
+  opacity: .45;
+}
+
 .card-row {
   display: grid;
   grid-template-columns: 1fr auto;
