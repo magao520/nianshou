@@ -348,7 +348,10 @@ function collectReady({ sell = false } = {}) {
   const ready = player.plots
     .map((plot, index) => ({ plot, index }))
     .filter(({ plot }) => plot.crop && cropProgress(plot) >= 1);
-  if (!ready.length) return toast("暂无成熟蔬菜");
+  if (!ready.length) {
+    if (sell) return sellInventoryCrops();
+    return toast("暂无成熟蔬菜");
+  }
   let earned = 0;
   let harvested = 0;
   let mutations = 0;
@@ -375,6 +378,40 @@ function collectReady({ sell = false } = {}) {
   toast(sell ? `出售 ${harvested} 棵，获得 ${earned} 金币` : `采摘 ${harvested} 棵成熟蔬菜`);
 }
 
+function sellInventoryItem(key, qty = player.inventory[key] || 0) {
+  qty = Math.max(1, Math.floor(qty));
+  if (!player.inventory[key] || player.inventory[key] < qty) return toast("库存不足");
+  const price = defaultPrice(key);
+  const earned = price * qty;
+  commit((draft) => {
+    const p = draft.players[clientId];
+    p.inventory[key] -= qty;
+    if (p.inventory[key] <= 0) delete p.inventory[key];
+    p.coins += earned;
+    draft.events.push({ id: uid(), time: now(), text: `${p.name} 直接出售了 ${qty} 个${itemName(key)}` });
+  }, "sell-inventory");
+  toast(`出售 ${qty} 个${itemName(key)}，获得 ${earned} 金币`);
+  if (activePanel === "bag") openBag();
+}
+
+function sellInventoryCrops() {
+  const rows = Object.entries(player.inventory || {}).filter(([key]) => !isPrize(key));
+  if (!rows.length) return toast("暂无成熟地块，也没有可出售的背包蔬菜");
+  let earned = 0;
+  let count = 0;
+  commit((draft) => {
+    const p = draft.players[clientId];
+    rows.forEach(([key, qty]) => {
+      earned += defaultPrice(key) * qty;
+      count += qty;
+      delete p.inventory[key];
+    });
+    p.coins += earned;
+    draft.events.push({ id: uid(), time: now(), text: `${p.name} 出售了背包里的 ${count} 个蔬菜` });
+  }, "sell-inventory-crops");
+  toast(`出售背包蔬菜 ${count} 个，获得 ${earned} 金币`);
+}
+
 function renderAll() {
   if (!player) return;
   $("#coinText").textContent = player.coins;
@@ -399,9 +436,11 @@ function openPanel(panel) {
   document.querySelectorAll(".dock button").forEach((btn) => btn.classList.toggle("active", btn.dataset.panel === panel));
   if (panel === "garden") {
     sheet.classList.add("hidden");
+    sheet.classList.remove("blackjack-sheet");
     return;
   }
   sheet.classList.remove("hidden");
+  sheet.classList.toggle("blackjack-sheet", panel === "blackjack");
   if (panel === "bag") openBag();
   if (panel === "market") openMarket();
   if (panel === "players") openPlayers();
@@ -434,6 +473,7 @@ function openBag() {
       <div class="pane-detail">
         <div class="item-title"><span class="item-icon">${itemIcon(selectedBagKey)}</span><div><strong>${itemName(selectedBagKey)}</strong><p>${itemDescription(selectedBagKey)}</p></div></div>
         <span class="chip">库存 ×${selectedQty}</span>
+        ${!isPrize(selectedBagKey) ? `<button class="market-action" data-sell-item="${selectedBagKey}">直接出售全部</button>` : ""}
         <button class="market-action primary-action" data-open-list="${selectedBagKey}">上架</button>
       </div>
     </div>
@@ -608,25 +648,36 @@ function renderBlackjack() {
   const b = blackjack;
   const dealerCards = b.dealer.map((card, i) => cardHtml(card, i === 1 && !b.revealDealer)).join("");
   const playerCards = b.player.map((card) => cardHtml(card, false)).join("");
+  const playerValue = b.player.length ? handValue(b.player) : 0;
+  const dealerValue = b.revealDealer ? handValue(b.dealer) : 0;
   return `
     <div class="blackjack-table">
-      <div class="huang-card">
-        <div class="huang-avatar"><span class="huang-hat"></span><span class="huang-face"></span><span class="huang-mustache"></span></div>
-        <div><strong>农场主老黄</strong><p>“下注随你，牌桌讲运气。”</p></div>
+      <div class="blackjack-hero">
+        <div class="huang-card">
+          <div class="huang-avatar"><span class="huang-hat"></span><span class="huang-face"></span><span class="huang-mustache"></span></div>
+          <div><strong>农场主老黄</strong><p>老黄把牌桌支在隔壁牧场，下注看运气。</p></div>
+        </div>
+        <div class="bet-row">
+          <label>下注<input id="bjBet" inputmode="numeric" value="${b.bet || 10}" ${b.phase !== "idle" && b.phase !== "done" ? "disabled" : ""}></label>
+          <button class="market-action primary-action" data-bj="deal">${b.phase === "done" ? "再来一局" : "发牌"}</button>
+        </div>
       </div>
-      <div class="bet-row">
-        <label>下注金币<input id="bjBet" inputmode="numeric" value="${b.bet || 10}" ${b.phase !== "idle" && b.phase !== "done" ? "disabled" : ""}></label>
-        <button class="market-action primary-action" data-bj="deal">${b.phase === "done" ? "再来一局" : "发牌"}</button>
+      <div class="bj-scorebar">
+        <span>你：${playerValue || "待发牌"}${playerValue ? "点" : ""}</span>
+        <span>老黄：${dealerValue ? `${dealerValue}点` : "暗牌"}</span>
+        <span>下注：${b.bet || 10}</span>
       </div>
-      <div class="card-zone">
-        <strong>老黄 ${b.revealDealer ? `(${handValue(b.dealer)}点)` : ""}</strong>
-        <div class="cards">${dealerCards || `<span class="empty-card">待发牌</span>`}</div>
+      <div class="bj-board">
+        <div class="card-zone dealer-zone">
+          <strong>老黄的牌</strong>
+          <div class="cards">${dealerCards || `<span class="empty-card">待发牌</span>`}</div>
+        </div>
+        <div class="card-zone player-zone">
+          <strong>你的牌</strong>
+          <div class="cards">${playerCards || `<span class="empty-card">待发牌</span>`}</div>
+        </div>
       </div>
-      <div class="card-zone player-zone">
-        <strong>你 ${b.player.length ? `(${handValue(b.player)}点)` : ""}</strong>
-        <div class="cards">${playerCards || `<span class="empty-card">待发牌</span>`}</div>
-      </div>
-      <p class="bj-message">${b.message}</p>
+      <p class="bj-message ${b.outcome ? `result-${b.outcome}` : ""}">${b.message}</p>
       <div class="bj-actions">
         <button class="market-action" data-bj="hit" ${b.phase !== "player" ? "disabled" : ""}>要牌</button>
         <button class="market-action primary-action" data-bj="stand" ${b.phase !== "player" ? "disabled" : ""}>停牌/交牌</button>
@@ -805,6 +856,7 @@ function draw() {
   drawClouds(w);
   drawBirds(w, h);
   drawFarmBase(w, h);
+  drawAnimals(w, h);
   drawPlots(w, h);
   drawParticles();
   drawHudHint(w, h);
@@ -920,6 +972,103 @@ function drawFarmDecoration(w, h) {
   drawImg("sack", w * 0.32, h * 0.05, 54);
   drawImg("cornDouble", -w * 0.48, -h * 0.04, 64);
   drawImg("cornDouble", w * 0.38, -h * 0.02, 64);
+}
+
+function drawAnimals(w, h) {
+  const baseY = h * 0.64;
+  const cowX = 42 + Math.abs(Math.sin(t * 0.34)) * (w - 108);
+  const sheepX = w - 54 - Math.abs(Math.sin(t * 0.28 + 1.4)) * (w - 120);
+  const chickenX = 76 + ((t * 28) % Math.max(120, w - 150));
+  drawCow(cowX, baseY, Math.sin(t * 0.34) > 0 ? 1 : -1);
+  drawSheep(sheepX, baseY + 56, Math.sin(t * 0.28 + 1.4) > 0 ? -1 : 1);
+  drawChicken(chickenX, baseY + 112, 1);
+}
+
+function drawCow(x, y, dir = 1) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(dir * 0.72, 0.72);
+  ctx.fillStyle = "rgba(45, 70, 32, .16)";
+  ctx.beginPath();
+  ctx.ellipse(0, 20, 34, 8, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#fff7ea";
+  roundRect(-30, -12, 52, 26, 12, true);
+  ctx.fillStyle = "#60412b";
+  ctx.beginPath();
+  ctx.ellipse(-12, -2, 10, 8, -0.3, 0, TAU);
+  ctx.ellipse(10, 6, 8, 7, 0.4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#fff7ea";
+  roundRect(18, -18, 24, 21, 10, true);
+  ctx.fillStyle = "#f2a6a6";
+  ctx.beginPath();
+  ctx.ellipse(33, -5, 9, 6, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#31271e";
+  ctx.fillRect(-22, 12, 5, 14);
+  ctx.fillRect(9, 12, 5, 14);
+  ctx.fillRect(29, 0, 3, 3);
+  ctx.restore();
+}
+
+function drawSheep(x, y, dir = 1) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(dir * 0.66, 0.66);
+  ctx.fillStyle = "rgba(45, 70, 32, .16)";
+  ctx.beginPath();
+  ctx.ellipse(0, 18, 30, 8, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#fffdf2";
+  [-18, -5, 8, 19].forEach((cx, i) => {
+    ctx.beginPath();
+    ctx.arc(cx, -4 + Math.sin(i) * 2, 14, 0, TAU);
+    ctx.fill();
+  });
+  ctx.fillStyle = "#5d5042";
+  roundRect(22, -12, 18, 18, 8, true);
+  ctx.fillRect(-18, 9, 5, 12);
+  ctx.fillRect(9, 9, 5, 12);
+  ctx.fillStyle = "#201a15";
+  ctx.fillRect(31, -5, 3, 3);
+  ctx.restore();
+}
+
+function drawChicken(x, y, dir = 1) {
+  ctx.save();
+  ctx.translate(x, y + Math.sin(t * 8) * 1.5);
+  ctx.scale(dir * 0.55, 0.55);
+  ctx.fillStyle = "rgba(45, 70, 32, .14)";
+  ctx.beginPath();
+  ctx.ellipse(0, 17, 18, 5, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#fff5d8";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 17, 20, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#f04e3e";
+  ctx.beginPath();
+  ctx.arc(2, -19, 5, 0, TAU);
+  ctx.arc(-5, -18, 4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#ffb23f";
+  ctx.beginPath();
+  ctx.moveTo(15, -4);
+  ctx.lineTo(27, 1);
+  ctx.lineTo(15, 6);
+  ctx.fill();
+  ctx.strokeStyle = "#a66a24";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-5, 18);
+  ctx.lineTo(-8, 28);
+  ctx.moveTo(7, 18);
+  ctx.lineTo(10, 28);
+  ctx.stroke();
+  ctx.fillStyle = "#2e241b";
+  ctx.fillRect(9, -8, 3, 3);
+  ctx.restore();
 }
 
 function drawPlots(w, h) {
@@ -1436,6 +1585,7 @@ function bind() {
     const bagTab = event.target.closest("[data-bag-tab]")?.dataset.bagTab;
     const listKey = event.target.closest("[data-list]")?.dataset.list;
     const openListKey = event.target.closest("[data-open-list]")?.dataset.openList;
+    const sellItemKey = event.target.closest("[data-sell-item]")?.dataset.sellItem;
     const bagSelect = event.target.closest("[data-bag-select]")?.dataset.bagSelect;
     const delistId = event.target.closest("[data-delist]")?.dataset.delist;
     const buyId = event.target.closest("[data-buy]")?.dataset.buy;
@@ -1446,6 +1596,7 @@ function bind() {
     if (bagTab) { bagCategory = bagTab; selectedBagKey = ""; openBag(); }
     if (listKey) listItem(listKey, Number($(`#qty-${CSS.escape(listKey)}`).value), Number($(`#price-${CSS.escape(listKey)}`).value));
     if (openListKey) openListingModal(openListKey);
+    if (sellItemKey) sellInventoryItem(sellItemKey);
     if (bagSelect) { selectedBagKey = bagSelect; openBag(); }
     if (delistId) delist(delistId);
     if (buyId) buy(buyId);

@@ -467,6 +467,14 @@ h1 {
   backdrop-filter: blur(22px);
 }
 
+.sheet.blackjack-sheet {
+  left: 8px;
+  right: 8px;
+  bottom: calc(82px + env(safe-area-inset-bottom));
+  max-height: min(78vh, 740px);
+  border-radius: 34px;
+}
+
 .sheet header {
   display: flex;
   align-items: center;
@@ -722,22 +730,36 @@ h1 {
 
 .blackjack-table {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   padding: 12px;
-  border-radius: 28px;
+  border-radius: 30px;
   color: #fff7df;
   background:
-    radial-gradient(circle at 18% 12%, rgba(255,216,113,.22), transparent 22%),
-    linear-gradient(160deg, #245833, #173b2f 56%, #6c4528);
+    radial-gradient(circle at 16% 8%, rgba(255,224,133,.32), transparent 22%),
+    radial-gradient(circle at 90% 92%, rgba(181,108,46,.5), transparent 30%),
+    linear-gradient(160deg, #2f7344, #174331 52%, #80522d);
+  box-shadow: inset 0 0 0 4px rgba(255,255,255,.09);
+}
+
+.blackjack-hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
 }
 
 .huang-card {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 10px;
-  border-radius: 22px;
-  background: rgba(255,255,255,.14);
+  padding: 9px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.1));
+}
+
+.huang-card p {
+  margin: 2px 0 0;
+  color: rgba(255,247,223,.76);
+  font-size: 12px;
 }
 
 .huang-avatar {
@@ -805,30 +827,80 @@ h1 {
   gap: 8px;
 }
 
+.bet-row {
+  align-items: end;
+  padding: 8px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.12);
+}
+
+.bet-row label {
+  color: rgba(255,247,223,.72);
+}
+
+.bet-row input {
+  height: 42px;
+}
+
 .bj-actions {
   grid-template-columns: repeat(3, 1fr);
+  position: sticky;
+  bottom: 0;
+  padding-top: 4px;
+  background: linear-gradient(180deg, rgba(35,82,49,0), rgba(35,82,49,.92) 24%);
+}
+
+.bj-scorebar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.bj-scorebar span {
+  padding: 8px 6px;
+  border-radius: 15px;
+  text-align: center;
+  color: #253322;
+  background: linear-gradient(180deg, #fff2a8, #a5ef80);
+  font-size: 12px;
+  font-weight: 1000;
+}
+
+.bj-board {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .card-zone {
   display: grid;
   gap: 7px;
+  min-height: 126px;
   padding: 10px;
   border-radius: 20px;
-  background: rgba(255,255,255,.12);
+  background:
+    radial-gradient(circle at 50% 100%, rgba(255,239,180,.13), transparent 35%),
+    rgba(255,255,255,.12);
+}
+
+.card-zone strong {
+  font-size: 13px;
+  color: #fff6c5;
 }
 
 .cards {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-content: start;
 }
 
 .bj-card,
 .empty-card {
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 64px;
+  width: 42px;
+  height: 58px;
   border-radius: 10px;
   color: #1f2b25;
   background: #fffdf3;
@@ -852,8 +924,30 @@ h1 {
 
 .bj-message {
   margin: 0;
+  min-height: 36px;
+  padding: 9px 11px;
+  border-radius: 18px;
   color: #fff2bd;
+  background: rgba(26,51,34,.5);
   font-weight: 900;
+}
+
+.bj-message.result-win {
+  color: #fff27a;
+}
+
+.bj-message.result-lose {
+  color: #ffc0a6;
+}
+
+@media (max-width: 430px) {
+  .bj-board {
+    grid-template-columns: 1fr;
+  }
+
+  .card-zone {
+    min-height: 94px;
+  }
 }
 
 @keyframes reelSpin {
